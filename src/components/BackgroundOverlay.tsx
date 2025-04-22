@@ -2,7 +2,7 @@ export const BackgroundOverlay = () => {
   return (
     <div className="fixed inset-0 pointer-events-none z-0">
       <video 
-        src="/Digital Error Noise Background (4).mov"
+        src="/background.mp4"
         autoPlay
         loop
         muted
