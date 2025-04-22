@@ -179,7 +179,7 @@ const Index = () => {
                 className="h-20 md:h-28"
               />
             </div>
-            <p className="text-lg text-muted-foreground max-w-2xl">
+            <p className="text-base md:text-lg text-muted-foreground max-w-2xl">
               <span className="text-white">Hey, I'm Sofaspartan</span> — a bedroom producer fusing chiptune, synthwave, and EDM into a high-voltage blast of pixelated nostalgia and neon-charged soundscapes. My tracks don't just play — they level up.
             </p>
           </div>
