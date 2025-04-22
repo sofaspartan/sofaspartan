@@ -3,18 +3,17 @@ import { useEffect, useRef } from 'react';
 interface AudioSpectrumProps {
   isPlaying: boolean;
   audioElement: HTMLAudioElement | null;
+  className?: string;
 }
 
-export const AudioSpectrum = ({ isPlaying, audioElement }: AudioSpectrumProps) => {
+export const AudioSpectrum = ({ isPlaying, audioElement, className = '' }: AudioSpectrumProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number>();
   const lastUpdateRef = useRef<number>(0);
 
   useEffect(() => {
-    if (!audioElement || !canvasRef.current) return;
-
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas?.getContext('2d');
     if (!ctx) return;
 
     const barCount = 4;
@@ -25,7 +24,7 @@ export const AudioSpectrum = ({ isPlaying, audioElement }: AudioSpectrumProps) =
     const updateInterval = 100; // Update every 100ms
 
     const drawBars = (timestamp: number) => {
-      if (!ctx || !isPlaying) return;
+      if (!ctx) return;
 
       // Only update if enough time has passed
       if (timestamp - lastUpdateRef.current < updateInterval) {
@@ -39,7 +38,7 @@ export const AudioSpectrum = ({ isPlaying, audioElement }: AudioSpectrumProps) =
       for (let i = 0; i < barCount; i++) {
         const height = isPlaying 
           ? minHeight + Math.random() * (maxHeight - minHeight)
-          : minHeight;
+          : minHeight + (maxHeight - minHeight) * 0.5; // Static height when paused
         
         const x = i * (barWidth + barGap);
         const y = (canvas.height - height) / 2;
@@ -51,23 +50,21 @@ export const AudioSpectrum = ({ isPlaying, audioElement }: AudioSpectrumProps) =
       animationRef.current = requestAnimationFrame(drawBars);
     };
 
-    if (isPlaying) {
-      animationRef.current = requestAnimationFrame(drawBars);
-    }
+    animationRef.current = requestAnimationFrame(drawBars);
 
     return () => {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isPlaying, audioElement]);
+  }, [isPlaying]);
 
   return (
     <canvas
       ref={canvasRef}
       width={20}
       height={16}
-      className="ml-2 self-center"
+      className={`ml-2 self-center ${className}`}
     />
   );
 }; 

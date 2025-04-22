@@ -94,6 +94,35 @@ export const TrackList = ({ tracks, onTrackSelect, currentTrack, isPlaying, audi
     };
   }, []);
 
+  // Scroll to current track when it changes
+  useEffect(() => {
+    if (!currentTrack || !listRef.current) return;
+
+    const currentTrackElement = listRef.current.querySelector(`[data-track-id="${currentTrack.id}"]`) as HTMLElement;
+    if (!currentTrackElement) return;
+
+    const listRect = listRef.current.getBoundingClientRect();
+    const trackRect = currentTrackElement.getBoundingClientRect();
+
+    // Calculate if the track is outside the visible area
+    const isAbove = trackRect.top < listRect.top;
+    const isBelow = trackRect.bottom > listRect.bottom;
+
+    if (isAbove || isBelow) {
+      // Calculate the scroll position to center the track
+      const trackTop = currentTrackElement.offsetTop;
+      const trackHeight = currentTrackElement.offsetHeight;
+      const listHeight = listRef.current.offsetHeight;
+      const scrollTop = trackTop - (listHeight / 2) + (trackHeight / 2);
+
+      // Smooth scroll the list container
+      listRef.current.scrollTo({
+        top: scrollTop,
+        behavior: 'smooth'
+      });
+    }
+  }, [currentTrack]);
+
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-6">
       <div 
@@ -106,7 +135,9 @@ export const TrackList = ({ tracks, onTrackSelect, currentTrack, isPlaying, audi
             <div 
               className="w-[240px] h-[240px] md:w-[320px] md:h-[320px] rounded-lg overflow-hidden shadow-lg transition-transform duration-100"
               style={{
-                transform: `perspective(1000px) rotateX(${tiltY}deg) rotateY(${tiltX}deg)`,
+                transform: window.innerWidth >= 768 
+                  ? `perspective(1000px) rotateX(${tiltY}deg) rotateY(${tiltX}deg)`
+                  : 'none',
                 transformStyle: 'preserve-3d'
               }}
             >
@@ -148,6 +179,7 @@ export const TrackList = ({ tracks, onTrackSelect, currentTrack, isPlaying, audi
                 return (
                   <div
                     key={track.id}
+                    data-track-id={track.id}
                     className={`flex items-center gap-4 p-3 md:p-4 hover:bg-white/10 transition-all duration-200 cursor-pointer group rounded-lg ${
                       isCurrentTrack ? 'bg-primary/10' : ''
                     }`}
@@ -169,7 +201,7 @@ export const TrackList = ({ tracks, onTrackSelect, currentTrack, isPlaying, audi
                           {track.title}
                         </h3>
                         {isCurrentTrack && (
-                          <AudioSpectrum isPlaying={isPlaying} audioElement={audioElement} />
+                          <AudioSpectrum isPlaying={isPlaying} audioElement={audioElement} className="hidden md:block" />
                         )}
                       </div>
                       <p className="text-xs md:text-sm text-muted-foreground truncate group-hover:text-white/80 transition-colors">

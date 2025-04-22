@@ -192,7 +192,7 @@ const Index = () => {
           onTrackSelect={handleTrackSelect}
           currentTrack={currentTrackIndex !== null ? tracks[currentTrackIndex] : null}
           isPlaying={isPlaying}
-          audioElement={audioElement}
+          audioElement={document.querySelector('audio')}
         />
       </main>
 

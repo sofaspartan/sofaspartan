@@ -187,7 +187,9 @@ export const MusicPlayer = ({ currentTrack, onNextTrack, onPreviousTrack, onPlay
             <div 
               className="relative w-80 h-80 rounded-2xl overflow-hidden shadow-2xl transition-transform duration-100"
               style={{
-                transform: `perspective(1000px) rotateX(${tiltY}deg) rotateY(${tiltX}deg)`,
+                transform: window.innerWidth >= 768 
+                  ? `perspective(1000px) rotateX(${tiltY}deg) rotateY(${tiltX}deg)`
+                  : 'none',
                 transformStyle: 'preserve-3d'
               }}
             >
@@ -207,7 +209,7 @@ export const MusicPlayer = ({ currentTrack, onNextTrack, onPreviousTrack, onPlay
               <div className="flex items-center justify-center gap-2">
                 <h2 className="text-3xl font-bold">{currentTrack?.title || 'No track selected'}</h2>
                 {currentTrack && (
-                  <AudioSpectrum isPlaying={isPlaying} audioElement={audioRef.current} />
+                  <AudioSpectrum isPlaying={isPlaying} audioElement={audioRef.current} className="hidden md:block" />
                 )}
               </div>
               <p className="text-xl text-muted-foreground">{currentTrack?.artist}</p>
@@ -289,7 +291,7 @@ export const MusicPlayer = ({ currentTrack, onNextTrack, onPreviousTrack, onPlay
                 <div className="flex items-center gap-2">
                   <p className="font-medium truncate">{currentTrack?.title || 'No track selected'}</p>
                   {currentTrack && (
-                    <AudioSpectrum isPlaying={isPlaying} audioElement={audioRef.current} />
+                    <AudioSpectrum isPlaying={isPlaying} audioElement={audioRef.current} className="hidden md:block" />
                   )}
                 </div>
                 <p className="text-xs md:text-sm text-muted-foreground truncate">{currentTrack?.artist}</p>
