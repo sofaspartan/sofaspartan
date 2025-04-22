@@ -1,0 +1,32 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 228 18% 13%;
+    --foreground: 0 0% 98%;
+    --card: 228 18% 13%;
+    --card-foreground: 0 0% 98%;
+    --primary: 250 95% 60%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 228 18% 20%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 228 18% 20%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 250 95% 60%;
+    --accent-foreground: 0 0% 98%;
+    --radius: 0.75rem;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+}
+
+@layer utilities {
+  .glass-morphism {
+    @apply backdrop-blur-xl bg-white/5 border border-white/10;
+  }
+}
