@@ -176,11 +176,11 @@ const Index = () => {
               <img 
                 src="/sofaspartan_logo_white_horizontal.png" 
                 alt="Sofaspartan" 
-                className="h-24 md:h-32"
+                className="h-20 md:h-28"
               />
             </div>
-            <p className="text-xl text-muted-foreground max-w-2xl">
-              <span className="text-white">Hey, I'm Sofaspartan</span> — a bedroom producer mixing up chiptune, synthwave, and EDM into a vibrant blend of pixelated nostalgia and neon-soaked energy. My tracks don't just play — they power up.
+            <p className="text-lg text-muted-foreground max-w-2xl">
+              <span className="text-white">Hey, I'm Sofaspartan</span> — a bedroom producer fusing chiptune, synthwave, and EDM into a high-voltage blast of pixelated nostalgia and neon-charged soundscapes. My tracks don't just play — they level up.
             </p>
           </div>
         </div>

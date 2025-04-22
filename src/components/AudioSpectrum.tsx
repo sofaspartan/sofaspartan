@@ -8,9 +8,7 @@ interface AudioSpectrumProps {
 export const AudioSpectrum = ({ isPlaying, audioElement }: AudioSpectrumProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number>();
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const lastUpdateRef = useRef<number>(0);
 
   useEffect(() => {
     if (!audioElement || !canvasRef.current) return;
@@ -19,56 +17,42 @@ export const AudioSpectrum = ({ isPlaying, audioElement }: AudioSpectrumProps) =
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Create audio context if it doesn't exist
-    if (!audioContextRef.current) {
-      audioContextRef.current = new AudioContext();
-      analyserRef.current = audioContextRef.current.createAnalyser();
-      
-      // Connect the audio element to the analyser
-      sourceRef.current = audioContextRef.current.createMediaElementSource(audioElement);
-      sourceRef.current.connect(analyserRef.current);
-      analyserRef.current.connect(audioContextRef.current.destination);
-      
-      analyserRef.current.fftSize = 256;
-    }
+    const barCount = 4;
+    const barWidth = 3;
+    const barGap = 2;
+    const maxHeight = 12;
+    const minHeight = 2;
+    const updateInterval = 100; // Update every 100ms
 
-    const analyser = analyserRef.current;
-    const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const drawBars = (timestamp: number) => {
+      if (!ctx || !isPlaying) return;
 
-    const draw = () => {
-      if (!ctx || !canvas || !analyser) return;
-
-      animationRef.current = requestAnimationFrame(draw);
-      analyser.getByteFrequencyData(dataArray);
-
-      const centerX = canvas.width / 2;
-      const centerY = canvas.height / 2;
-      const radius = Math.min(centerX, centerY) * 0.8;
+      // Only update if enough time has passed
+      if (timestamp - lastUpdateRef.current < updateInterval) {
+        animationRef.current = requestAnimationFrame(drawBars);
+        return;
+      }
+      lastUpdateRef.current = timestamp;
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.beginPath();
-      ctx.strokeStyle = 'hsl(var(--primary))';
-      ctx.lineWidth = 2;
-
-      for (let i = 0; i < bufferLength; i++) {
-        const value = dataArray[i];
-        const percent = value / 255;
-        const angle = (i * 2 * Math.PI) / bufferLength;
-        const x1 = centerX + Math.cos(angle) * radius;
-        const y1 = centerY + Math.sin(angle) * radius;
-        const x2 = centerX + Math.cos(angle) * (radius + percent * 30);
-        const y2 = centerY + Math.sin(angle) * (radius + percent * 30);
-
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
+      
+      for (let i = 0; i < barCount; i++) {
+        const height = isPlaying 
+          ? minHeight + Math.random() * (maxHeight - minHeight)
+          : minHeight;
+        
+        const x = i * (barWidth + barGap);
+        const y = (canvas.height - height) / 2;
+        
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+        ctx.fillRect(x, y, barWidth, height);
       }
 
-      ctx.stroke();
+      animationRef.current = requestAnimationFrame(drawBars);
     };
 
     if (isPlaying) {
-      draw();
+      animationRef.current = requestAnimationFrame(drawBars);
     }
 
     return () => {
@@ -78,21 +62,12 @@ export const AudioSpectrum = ({ isPlaying, audioElement }: AudioSpectrumProps) =
     };
   }, [isPlaying, audioElement]);
 
-  // Cleanup audio context when component unmounts
-  useEffect(() => {
-    return () => {
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-      }
-    };
-  }, []);
-
   return (
     <canvas
       ref={canvasRef}
-      width={320}
-      height={320}
-      className="w-[240px] h-[240px] md:w-[320px] md:h-[320px] rounded-lg bg-black/20"
+      width={20}
+      height={16}
+      className="ml-2 self-center"
     />
   );
 }; 
