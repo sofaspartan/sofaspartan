@@ -180,7 +180,7 @@ const Index = () => {
               />
             </div>
             <p className="text-base md:text-lg text-muted-foreground max-w-2xl">
-              <span className="text-white">Hey, I'm Sofaspartan</span> — a bedroom producer fusing chiptune, synthwave, and EDM into a high-voltage blast of pixelated nostalgia and neon-charged soundscapes. My tracks don't just play — they level up.
+              <span className="text-white">Hey, I'm Sofaspartan</span>, a bedroom producer fusing chiptune, synthwave, and EDM into a high-voltage blast of pixelated nostalgia and neon-charged soundscapes. My tracks don't just play, <i>they level up.</i>
             </p>
           </div>
         </div>
