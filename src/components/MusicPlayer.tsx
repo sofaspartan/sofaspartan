@@ -181,7 +181,7 @@ export const MusicPlayer = ({ currentTrack, onNextTrack, onPreviousTrack, onPlay
 
   return (
     <div className={`fixed ${isMaximized ? 'inset-0' : 'bottom-4 left-1/2 -translate-x-1/2'} glass-morphism rounded-xl ${isMaximized ? 'z-50' : 'z-40'} ${!isMaximized && 'w-[calc(100%-2rem)] md:w-[calc(100%-4rem)] max-w-5xl'}`}>
-      <div className={`flex ${isMaximized ? 'flex-col items-center justify-center min-h-screen' : 'items-center justify-between'} gap-2 md:gap-4 p-2 md:p-4 relative`}>
+      <div className={`flex ${isMaximized ? 'flex-col items-center justify-center min-h-screen' : 'items-center justify-between'} gap-2 md:gap-4 p-3 md:p-4 relative`}>
         {isMaximized ? (
           <div className="flex flex-col items-center gap-6 md:gap-8 w-full max-w-2xl">
             <div 
@@ -214,7 +214,20 @@ export const MusicPlayer = ({ currentTrack, onNextTrack, onPreviousTrack, onPlay
               </div>
               <p className="text-lg md:text-xl text-muted-foreground">{currentTrack?.artist}</p>
             </div>
-            <div className="flex items-center gap-4 md:gap-6">
+            <div className="w-full max-w-md space-y-1 md:space-y-2 px-4 md:px-0">
+              <Slider
+                value={[duration ? (currentTime / duration) * 100 : 0]}
+                onValueChange={handleProgressChange}
+                max={100}
+                step={0.1}
+                className="w-full"
+              />
+              <div className="flex justify-between text-xs md:text-sm text-muted-foreground">
+                <span>{formatTime(currentTime)}</span>
+                <span>{formatTime(duration)}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-4 md:gap-6 -mt-2">
               <button 
                 className="h-12 w-12 md:h-14 md:w-14 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-all duration-200 hover:scale-110"
                 onClick={onPreviousTrack}
@@ -233,19 +246,6 @@ export const MusicPlayer = ({ currentTrack, onNextTrack, onPreviousTrack, onPlay
               >
                 <ForwardIcon className="h-6 w-6 md:h-8 md:w-8" />
               </button>
-            </div>
-            <div className="w-full max-w-md space-y-1 md:space-y-2">
-              <Slider
-                value={[duration ? (currentTime / duration) * 100 : 0]}
-                onValueChange={handleProgressChange}
-                max={100}
-                step={0.1}
-                className="w-full"
-              />
-              <div className="flex justify-between text-xs md:text-sm text-muted-foreground">
-                <span>{formatTime(currentTime)}</span>
-                <span>{formatTime(duration)}</span>
-              </div>
             </div>
             <div className="flex items-center gap-3 md:gap-4 w-56 md:w-64">
               <button
@@ -268,33 +268,38 @@ export const MusicPlayer = ({ currentTrack, onNextTrack, onPreviousTrack, onPlay
               className="absolute top-2 md:top-4 right-2 md:right-4 h-8 w-8 md:h-10 md:w-10"
               onClick={toggleMaximize}
             >
-              {isMaximized ? <ArrowsPointingInIcon className="h-4 w-4 md:h-5 md:w-5" /> : <ArrowsPointingOutIcon className="h-4 w-4 md:h-5 md:w-5" />}
+              <ArrowsPointingInIcon className="h-4 w-4 md:h-5 md:w-5" />
             </Button>
           </div>
         ) : (
           <>
-            <div className="flex items-center gap-2 md:gap-4 flex-shrink-0">
-              <div className="relative aspect-square w-10 md:w-16 rounded-lg overflow-hidden flex-shrink-0">
-                {currentTrack?.albumArt ? (
-                  <img
-                    src={currentTrack.albumArt}
-                    alt={`${currentTrack.title} album art`}
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <div className="h-full w-full bg-primary flex items-center justify-center">
-                    <MusicalNoteIcon className="h-5 w-5 md:h-8 md:w-8 text-white" />
-                  </div>
-                )}
-              </div>
-              <div className="text-xs md:text-base min-w-0 max-w-[100px] md:max-w-[200px]">
-                <div className="flex items-center gap-2">
-                  <p className="font-medium truncate">{currentTrack?.title || 'No track selected'}</p>
+            <div className="relative flex-grow group">
+              <div 
+                className="flex items-center gap-3 md:gap-4 flex-shrink-0 cursor-pointer"
+                onClick={toggleMaximize}
+              >
+                <div className="relative aspect-square w-10 md:w-16 rounded-sm md:rounded-lg overflow-hidden flex-shrink-0 group-hover:scale-105 transition-transform duration-200">
+                  {currentTrack?.albumArt ? (
+                    <img
+                      src={currentTrack.albumArt}
+                      alt={`${currentTrack.title} album art`}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="h-full w-full bg-primary flex items-center justify-center">
+                      <MusicalNoteIcon className="h-5 w-5 md:h-8 md:w-8 text-white" />
+                    </div>
+                  )}
                 </div>
-                <p className="text-[10px] md:text-sm text-muted-foreground truncate">{currentTrack?.artist}</p>
+                <div className="text-xs md:text-base min-w-0 max-w-[180px] md:max-w-[200px]">
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium truncate text-base md:text-base group-hover:text-white transition-colors">{currentTrack?.title || 'No track selected'}</p>
+                  </div>
+                  <p className="text-sm md:text-sm text-muted-foreground truncate group-hover:text-white/80 transition-colors">{currentTrack?.artist}</p>
+                </div>
               </div>
             </div>
-            <div className="absolute right-12 md:left-1/2 md:-translate-x-1/2 flex items-center gap-1 md:gap-2 justify-end md:justify-center">
+            <div className="absolute right-4 md:left-1/2 md:-translate-x-1/2 flex items-center gap-1 md:gap-2 justify-end md:justify-center">
               <button 
                 className="h-8 w-8 md:h-12 md:w-12 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-all duration-200 hover:scale-110"
                 onClick={onPreviousTrack}
@@ -336,10 +341,10 @@ export const MusicPlayer = ({ currentTrack, onNextTrack, onPreviousTrack, onPlay
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6 md:h-8 md:w-8"
+                className="hidden md:flex h-6 w-6 md:h-8 md:w-8"
                 onClick={toggleMaximize}
               >
-                {isMaximized ? <ArrowsPointingInIcon className="h-3 w-3 md:h-4 md:w-4" /> : <ArrowsPointingOutIcon className="h-3 w-3 md:h-4 md:w-4" />}
+                <ArrowsPointingOutIcon className="h-3 w-3 md:h-4 md:w-4" />
               </Button>
             </div>
           </>
