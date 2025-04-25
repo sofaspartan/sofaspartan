@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { ChevronDown, ChevronUp, Reply, Settings, X, LogOut, SortAsc, SortDesc, ThumbsUp, ThumbsDown, LogIn, UserPlus, Mail, Flag, Edit, Trash2, Save, AlertTriangle } from 'lucide-react';
+import { ChevronDown, ChevronUp, Reply, Settings, X, LogOut, SortAsc, SortDesc, ThumbsUp, ThumbsDown, LogIn, UserPlus, Mail, Flag, Edit, Trash2, Save, AlertTriangle, Star, User } from 'lucide-react';
 
 // Types
 interface Comment {
@@ -17,6 +17,7 @@ interface Comment {
     user_metadata?: {
       display_name?: string;
       avatar_url?: string;
+      user_type?: string;
     };
   };
 }
@@ -45,7 +46,7 @@ if (!supabaseUrl || !supabaseKey) {
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Define Sort Orders
-type SortOrder = 'latest' | 'oldest' | 'likes' | 'dislikes';
+type SortOrder = 'latest' | 'oldest' | 'likes' | 'dislikes' | 'flagged';
 
 export default function Comments() {
   const [comments, setComments] = useState<Comment[]>([]);
@@ -203,7 +204,8 @@ export default function Comments() {
         emailRedirectTo: `${window.location.origin}/auth/callback`,
         data: {
           display_name: displayName,
-          email_confirmed: false
+          email_confirmed: false,
+          user_type: 'regular' // Set default user_type
         }
       }
     });
@@ -389,7 +391,16 @@ export default function Comments() {
 
       if (error) throw error;
       
-      setComments([...(data || []), ...comments]);
+      // Create a new comment object with user metadata
+      const newCommentWithUser = {
+        ...data[0],
+        user: {
+          email: user.email,
+          user_metadata: user.user_metadata
+        }
+      };
+      
+      setComments([newCommentWithUser, ...comments]);
       setNewComment('');
       setReplyingTo(null);
     } catch (err) {
@@ -423,11 +434,16 @@ export default function Comments() {
         return [...topLevelComments].sort((a, b) => b.likes - a.likes);
       case 'dislikes':
         return [...topLevelComments].sort((a, b) => b.dislikes - a.dislikes);
+      case 'flagged':
+        return [...topLevelComments].filter(comment => {
+          // Check if any user has flagged this comment
+          return Object.keys(userFlags).includes(comment.id);
+        });
       case 'latest':
       default:
         return [...topLevelComments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     }
-  }, [comments, sortOrder]);
+  }, [comments, sortOrder, userFlags]);
 
   // Get replies for a comment
   const getReplies = (commentId: string) => {
@@ -484,7 +500,9 @@ export default function Comments() {
     const isExpanded = expandedReplies[comment.id];
     const isFlaggedByUser = !!userFlags[comment.id];
     const isOwner = user?.id === comment.user_id;
+    const isAdmin = user?.user_metadata?.user_type === 'admin';
     const isEditing = editingCommentId === comment.id;
+    const isCommenterAdmin = comment.user?.user_metadata?.user_type === 'admin';
 
     const displayName = comment.user?.user_metadata?.display_name || comment.user?.email || 'Anonymous';
     const avatarUrl = comment.user?.user_metadata?.avatar_url;
@@ -509,8 +527,8 @@ export default function Comments() {
             {/* Top Right Actions (Flag, Edit, Delete) */} 
             {user && (
               <div className="absolute top-1 right-1 flex items-center gap-1">
-                {/* Edit Button (only if owner) */} 
-                {isOwner && !isEditing && (
+                {/* Edit Button (if owner or admin) */} 
+                {(isOwner || isAdmin) && !isEditing && (
                   <button
                     onClick={() => handleEditClick(comment)}
                     className="p-1.5 rounded-full text-white/50 hover:text-white hover:bg-white/10 transition-colors"
@@ -519,8 +537,8 @@ export default function Comments() {
                     <Edit className="w-4 h-4" />
                   </button>
                 )}
-                {/* Delete Button (only if owner) */} 
-                {isOwner && !isEditing && (
+                {/* Delete Button (if owner or admin) */} 
+                {(isOwner || isAdmin) && !isEditing && (
                   <button
                     onClick={() => handleDeleteClick(comment.id)}
                     className="p-1.5 rounded-full text-red-500/60 hover:text-red-500 hover:bg-white/10 transition-colors"
@@ -529,9 +547,9 @@ export default function Comments() {
                     <Trash2 className="w-4 h-4" />
                   </button>
                 )}
-                {/* Flag Button and Dropdown */} 
-                {!isEditing && ( // Don't show flag while editing
-                  <div className="relative"> {/* Relative container for dropdown positioning */}
+                {/* Flag Button and Dropdown (only if not editing) */} 
+                {!isEditing && !isOwner && ( // Show flag for all users on others' comments
+                  <div className="relative flag-dropdown-container">
                     <button
                       onClick={() => setOpenFlagMenu(openFlagMenu === comment.id ? null : comment.id)}
                       className={`p-1.5 rounded-full text-white/50 hover:text-white hover:bg-white/10 transition-colors ${userFlags[comment.id] ? 'text-yellow-500' : ''}`}
@@ -540,17 +558,17 @@ export default function Comments() {
                       <Flag className="w-4 h-4" />
                     </button>
                     {openFlagMenu === comment.id && (
-                      <div className="absolute top-full right-0 mt-1 w-44 bg-white/10 border border-white/20 rounded-lg shadow-lg z-20 py-1">
-                        <button onClick={() => handleFlagComment(comment.id, 'inappropriate')} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/20 flex items-center gap-2">
+                      <div className="absolute top-full right-0 mt-1 w-44 bg-[#2c2c2c] border border-white/20 rounded-lg shadow-lg z-20 py-1">
+                        <button onClick={() => handleFlagComment(comment.id, 'inappropriate')} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2">
                           Inappropriate
                         </button>
-                        <button onClick={() => handleFlagComment(comment.id, 'spam')} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/20 flex items-center gap-2">
+                        <button onClick={() => handleFlagComment(comment.id, 'spam')} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2">
                           Spam
                         </button>
                         {isFlaggedByUser && (
                           <>
                             <div className="h-px bg-white/10 mx-2 my-1"></div>
-                            <button onClick={() => handleFlagComment(comment.id, 'inappropriate')} className="w-full text-left px-3 py-1.5 text-sm text-red-400 hover:bg-white/20 flex items-center gap-2">
+                            <button onClick={() => handleFlagComment(comment.id, 'inappropriate')} className="w-full text-left px-3 py-1.5 text-sm text-red-400 hover:bg-white/10 flex items-center gap-2">
                               Unflag
                             </button>
                           </>
@@ -563,11 +581,50 @@ export default function Comments() {
             )}
 
             <div className="flex justify-between items-start mb-2">
-              <div>
+              <div className="flex items-center gap-2">
                 <span className="font-medium text-white/90">
                   {displayName}
                 </span>
-                <span className="text-white/60 text-sm ml-2">
+                {isCommenterAdmin ? (
+                  <div className="relative inline-block">
+                    <div className="bg-yellow-400/20 rounded-full p-0.5">
+                      <Star 
+                        className="w-3.5 h-3.5 text-yellow-400 cursor-help hover:opacity-80 transition-opacity" 
+                        onMouseEnter={(e) => {
+                          const tooltip = e.currentTarget.parentElement?.nextElementSibling;
+                          if (tooltip) tooltip.classList.remove('hidden');
+                        }}
+                        onMouseLeave={(e) => {
+                          const tooltip = e.currentTarget.parentElement?.nextElementSibling;
+                          if (tooltip) tooltip.classList.add('hidden');
+                        }}
+                      />
+                    </div>
+                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 px-2 py-1 bg-black/80 text-white text-xs rounded hidden pointer-events-none z-50">
+                      Admin
+                    </div>
+                  </div>
+                ) : (
+                  <div className="relative inline-block">
+                    <div className="bg-white/10 rounded-full p-0.5">
+                      <User 
+                        className="w-3.5 h-3.5 text-white/60 cursor-help hover:opacity-80 transition-opacity" 
+                        onMouseEnter={(e) => {
+                          const tooltip = e.currentTarget.parentElement?.nextElementSibling;
+                          if (tooltip) tooltip.classList.remove('hidden');
+                        }}
+                        onMouseLeave={(e) => {
+                          const tooltip = e.currentTarget.parentElement?.nextElementSibling;
+                          if (tooltip) tooltip.classList.add('hidden');
+                        }}
+                      />
+                    </div>
+                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 px-2 py-1 bg-black/80 text-white text-xs rounded hidden pointer-events-none z-50">
+                      User
+                    </div>
+                  </div>
+                )}
+                <span className="text-white/60 text-sm">
                   {new Date(comment.created_at).toLocaleDateString()}
                   {comment.updated_at && new Date(comment.updated_at).getTime() > new Date(comment.created_at).getTime() + 1000 && (
                     <span className="text-xs italic text-white/50 ml-1">(edited)</span>
@@ -971,6 +1028,10 @@ export default function Comments() {
   // Handle confirming comment delete
   const handleConfirmDelete = async () => {
     if (!showDeleteConfirmModal) return;
+    if (user?.user_metadata?.user_type !== 'admin') {
+      setError('You do not have permission to delete this comment.');
+      return;
+    }
     setIsDeletingComment(true);
     setError(null);
     try {
@@ -1010,6 +1071,36 @@ export default function Comments() {
     }
   };
 
+  // Add click outside handler for sort dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (showSortDropdown && !target.closest('.sort-dropdown-container')) {
+        setShowSortDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showSortDropdown]);
+
+  // Add click outside handler for flag dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (openFlagMenu && !target.closest('.flag-dropdown-container')) {
+        setOpenFlagMenu(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [openFlagMenu]);
+
   return (
     <div className="max-w-5xl mx-auto px-2 sm:px-6">
       <div className="bg-white/5 backdrop-blur-xl rounded-lg overflow-hidden shadow-lg mx-2 sm:mx-8 md:mx-0 glass-morphism">
@@ -1028,7 +1119,7 @@ export default function Comments() {
               <h2 className="text-2xl font-bold">Comments</h2>
               {/* Conditionally render Sort button/dropdown */}
               {!isCommentsCollapsed && (
-                <div className="relative ml-2"> {/* Added ml-2 for spacing */} 
+                <div className="relative ml-2 sort-dropdown-container"> {/* Added sort-dropdown-container class */}
                   <button
                     onClick={() => setShowSortDropdown(!showSortDropdown)}
                     className="flex items-center gap-1 text-sm text-white/60 hover:text-white transition-colors border border-white/10 px-3 py-1 rounded-lg"
@@ -1037,11 +1128,12 @@ export default function Comments() {
                     <ChevronDown className={`w-4 h-4 transition-transform ${showSortDropdown ? 'rotate-180' : ''}`} />
                   </button>
                   {showSortDropdown && (
-                    <div className="absolute top-full left-0 mt-1 w-44 bg-white/10 border border-white/20 rounded-lg shadow-lg z-10 py-1">
-                      <button onClick={() => { setSortOrder('latest'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/20 flex items-center gap-2"><SortDesc className='w-4 h-4'/> Latest</button>
-                      <button onClick={() => { setSortOrder('oldest'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/20 flex items-center gap-2"><SortAsc className='w-4 h-4'/> Oldest</button>
-                      <button onClick={() => { setSortOrder('likes'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/20 flex items-center gap-2"><ThumbsUp className='w-4 h-4'/> Most Upvoted</button>
-                      <button onClick={() => { setSortOrder('dislikes'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/20 flex items-center gap-2"><ThumbsDown className='w-4 h-4'/> Most Downvoted</button>
+                    <div className="absolute top-full left-0 mt-1 w-44 bg-[#2c2c2c] border border-white/20 rounded-lg shadow-lg z-10 py-1">
+                      <button onClick={() => { setSortOrder('latest'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><SortDesc className='w-4 h-4'/> Latest</button>
+                      <button onClick={() => { setSortOrder('oldest'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><SortAsc className='w-4 h-4'/> Oldest</button>
+                      <button onClick={() => { setSortOrder('likes'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><ThumbsUp className='w-4 h-4'/> Most Upvoted</button>
+                      <button onClick={() => { setSortOrder('dislikes'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><ThumbsDown className='w-4 h-4'/> Most Downvoted</button>
+                      <button onClick={() => { setSortOrder('flagged'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><Flag className='w-4 h-4'/> Flagged</button>
                     </div>
                   )}
                 </div>
@@ -1214,7 +1306,16 @@ export default function Comments() {
 
               {/* Comments List & Show More */}
               <div className="space-y-4">
-                {sortedComments.slice(0, visibleCommentCount).map(comment => renderComment(comment))}
+                {sortedComments.length > 0 ? (
+                  sortedComments.slice(0, visibleCommentCount).map(comment => renderComment(comment))
+                ) : (
+                  <div className="text-center py-8 text-white/60">
+                    <p className="text-sm">No comments found</p>
+                    {sortOrder === 'flagged' && (
+                      <p className="text-xs mt-1">No comments have been flagged yet</p>
+                    )}
+                  </div>
+                )}
               </div>
               {visibleCommentCount < sortedComments.length && (
                 <div className="mt-6 text-center">
@@ -1257,6 +1358,20 @@ export default function Comments() {
             </div>
             {/* Modal Form Content (Restored) */}
             <form onSubmit={handleProfileUpdate} className="space-y-4">
+              {/* Account Type Indicator */}
+              <div className="flex items-center gap-2 mb-2">
+                {user?.user_metadata?.user_type === 'admin' ? (
+                  <div className="flex items-center gap-2 text-yellow-400">
+                    <Star className="w-4 h-4" />
+                    <span className="text-sm font-medium">Admin Account</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 text-white/60">
+                    <User className="w-4 h-4" />
+                    <span className="text-sm font-medium">User Account</span>
+                  </div>
+                )}
+              </div>
               <div>
                 <label className="block text-sm font-medium mb-1 text-white/80">Display Name</label>
                 <input
