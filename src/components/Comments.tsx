@@ -1,0 +1,1358 @@
+import { useState, useEffect, useMemo } from 'react';
+import { createClient } from '@supabase/supabase-js';
+import { ChevronDown, ChevronUp, Reply, Settings, X, LogOut, SortAsc, SortDesc, ThumbsUp, ThumbsDown, LogIn, UserPlus, Mail, Flag, Edit, Trash2, Save, AlertTriangle } from 'lucide-react';
+
+// Types
+interface Comment {
+  id: string;
+  user_id: string;
+  content: string;
+  parent_id: string | null;
+  likes: number;
+  dislikes: number;
+  created_at: string;
+  updated_at: string;
+  user?: {
+    email: string;
+    user_metadata?: {
+      display_name?: string;
+      avatar_url?: string;
+    };
+  };
+}
+
+interface Vote {
+  id: string;
+  user_id: string;
+  comment_id: string;
+  vote_type: 'like' | 'dislike';
+  created_at: string;
+}
+
+interface FlagRecord {
+  comment_id: string;
+  flag_type: 'inappropriate' | 'spam';
+}
+
+// Supabase client
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error('Missing Supabase environment variables. Please check your .env.local file.');
+}
+
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Define Sort Orders
+type SortOrder = 'latest' | 'oldest' | 'likes' | 'dislikes';
+
+export default function Comments() {
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [userVotes, setUserVotes] = useState<Record<string, 'like' | 'dislike'>>({});
+  const [newComment, setNewComment] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [user, setUser] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [isSigningUp, setIsSigningUp] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [showSignUp, setShowSignUp] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({});
+  const [showSettings, setShowSettings] = useState(false);
+  const [newDisplayName, setNewDisplayName] = useState('');
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+  const [sortOrder, setSortOrder] = useState<SortOrder>('latest');
+  const [showSortDropdown, setShowSortDropdown] = useState(false);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [resetMessage, setResetMessage] = useState<string | null>(null);
+  const [showAuthForm, setShowAuthForm] = useState(false);
+  const [visibleCommentCount, setVisibleCommentCount] = useState(3);
+  const [userFlags, setUserFlags] = useState<Record<string, 'inappropriate' | 'spam'>>({});
+  const [openFlagMenu, setOpenFlagMenu] = useState<string | null>(null);
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState<string>('');
+  const [isUpdatingComment, setIsUpdatingComment] = useState(false);
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState<string | null>(null);
+  const [isDeletingComment, setIsDeletingComment] = useState(false);
+  const [isCommentsCollapsed, setIsCommentsCollapsed] = useState(false);
+
+  // Check user authentication and set up session listener
+  useEffect(() => {
+    // Function to fetch profile and merge with auth user
+    const fetchProfileAndSetUser = async (authUser: any) => {
+      try {
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('user_metadata')
+          .eq('id', authUser.id)
+          .single();
+
+        if (profileError && profileError.code !== 'PGRST116') { // Ignore "No rows found" error
+          console.error('Error fetching profile:', profileError);
+        }
+
+        // Merge auth user with profile metadata if it exists
+        const mergedUser = {
+          ...authUser,
+          user_metadata: profileData?.user_metadata || authUser.user_metadata || {}
+        };
+        console.log('Setting user with merged profile:', mergedUser);
+        setUser(mergedUser);
+
+      } catch (err) {
+        console.error('Error in fetchProfileAndSetUser:', err);
+        // Set user with only auth data if profile fetch fails
+        setUser(authUser);
+      }
+    };
+
+    // Initial session check
+    const checkUser = async () => {
+      try {
+        setIsLoading(true);
+        console.log('Checking initial session...');
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) {
+          console.error('Session error:', error);
+          setUser(null);
+          return;
+        }
+        console.log('Initial session check result:', session);
+        if (session?.user) {
+          console.log('User session found, fetching profile...', session.user.id);
+          await fetchProfileAndSetUser(session.user);
+        } else {
+          console.log('No user session found');
+          setUser(null);
+        }
+      } catch (err) {
+        console.error('Error checking session:', err);
+        setUser(null);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    // Set up auth state change listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log('Auth state changed:', event, session);
+      if (session?.user) {
+        console.log('Auth state change: User found, fetching profile...', session.user.id);
+        fetchProfileAndSetUser(session.user);
+      } else {
+        console.log('Clearing user from auth state change');
+        setUser(null);
+      }
+    });
+
+    checkUser();
+
+    // Cleanup subscription
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  // Handle sign in
+  const handleSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setResetMessage(null); // Clear reset message on sign-in attempt
+    setError(null);
+    
+    console.log('Signing in...');
+    
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    });
+
+    if (error) {
+      console.error('Sign in error:', error);
+      if (error.message.includes('Email not confirmed')) {
+        setError('Please confirm your email address before signing in. Check your email for the confirmation link.');
+      } else {
+        setError(error.message);
+      }
+      return;
+    }
+
+    console.log('Sign in successful:', data);
+    setEmail('');
+    setPassword('');
+  };
+
+  // Handle sign up
+  const handleSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setResetMessage(null); // Clear reset message on sign-up attempt
+    setError(null);
+    
+    console.log('Signing up...');
+    
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        data: {
+          display_name: displayName,
+          email_confirmed: false
+        }
+      }
+    });
+
+    if (error) {
+      console.error('Sign up error:', error);
+      setError(error.message);
+      return;
+    }
+
+    console.log('Sign up successful:', data);
+    
+    if (data.user?.identities?.length === 0) {
+      setError('This email is already registered. Please sign in instead.');
+    } else {
+      setError('Please check your email for the confirmation link. If you don\'t see it, check your spam folder.');
+    }
+    
+    setEmail('');
+    setPassword('');
+    setDisplayName('');
+  };
+
+  // Handle sign out
+  const handleSignOut = async () => {
+    if (isCommentsCollapsed) setIsCommentsCollapsed(false); // Expand if collapsed
+    try {
+      setError(null);
+      console.log('Signing out...');
+      
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error('Sign out error:', error);
+        throw error;
+      }
+      
+      console.log('Sign out successful');
+      setUser(null);
+    } catch (err) {
+      console.error('Error signing out:', err);
+      setError('Failed to sign out. Please try again.');
+    }
+  };
+
+  // Fetch comments and user votes based on user state
+  useEffect(() => {
+    console.log('User state changed, fetching comments...', user ? `User: ${user.id}` : 'Logged out');
+    fetchComments(); // Always fetch comments regardless of login state
+
+    if (user) {
+      console.log('User logged in, fetching votes and flags...');
+      fetchUserVotes();
+      fetchUserFlags(); // Fetch flags when user logs in
+    } else {
+      console.log('User logged out, clearing votes and flags...');
+      setUserVotes({});
+      setUserFlags({}); // Clear flags when logged out
+    }
+  }, [user]); // Re-run when user logs in or out
+
+  // Fetch comments with associated user profiles
+  const fetchComments = async () => {
+    try {
+      setError(null);
+      console.log('Fetching comments from DB...');
+      // First fetch comments
+      const { data: commentsData, error: commentsError } = await supabase
+        .from('comments')
+        .select('*') // Select all comment fields
+        .order('created_at', { ascending: false });
+
+      if (commentsError) throw commentsError;
+      if (!commentsData) {
+        console.log('No comments data received.');
+        setComments([]); // Keep clearing if fetch returns null/empty
+        return;
+      }
+      console.log(`Fetched ${commentsData.length} comments.`);
+
+      // Get unique user IDs from comments, filtering out nulls
+      const userIds = [...new Set(commentsData.map(comment => comment.user_id).filter(id => !!id))];
+      console.log('Unique user IDs from comments:', userIds);
+
+      let usersData: any[] = []; // Default to empty
+      if (userIds.length > 0) {
+        console.log('Fetching profiles for comment authors...');
+        // Fetch corresponding profiles
+        const { data: profilesData, error: profilesError } = await supabase
+          .from('profiles')
+          .select('id, user_metadata') // Select ID for matching and metadata for display
+          .in('id', userIds);
+
+        if (profilesError) {
+          console.error('Error fetching profiles:', profilesError);
+          // Continue without profile data if fetch fails
+        } else {
+          usersData = profilesData || [];
+          console.log(`Fetched ${usersData.length} profiles.`);
+        }
+      }
+
+      // Combine comments with user data
+      const commentsWithUsers = commentsData.map(comment => ({
+        ...comment,
+        // Find profile if user_id exists, otherwise user is undefined
+        user: comment.user_id ? usersData.find(profile => profile.id === comment.user_id) : undefined
+      }));
+
+      console.log('Setting comments state with combined data.');
+      setComments(commentsWithUsers);
+    } catch (err) {
+      console.error('Error fetching comments:', err);
+      setError('Failed to fetch comments. Please try again.');
+      setComments([]); // Keep clearing comments on error
+    }
+  };
+
+  // Fetch user's votes (only called when logged in)
+  const fetchUserVotes = async () => {
+    if (!user) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('votes')
+        .select('*')
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      // Convert votes array to a record of comment_id -> vote_type
+      const votes: Record<string, 'like' | 'dislike'> = {};
+      data.forEach((vote: Vote) => {
+        votes[vote.comment_id] = vote.vote_type;
+      });
+      setUserVotes(votes);
+    } catch (err) {
+      console.error('Error fetching user votes:', err);
+    }
+  };
+
+  // Fetch user's flags
+  const fetchUserFlags = async () => {
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from('flags')
+        .select('comment_id, flag_type')
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      const flags: Record<string, 'inappropriate' | 'spam'> = {};
+      data.forEach((flag: FlagRecord) => {
+        flags[flag.comment_id] = flag.flag_type;
+      });
+      setUserFlags(flags);
+      console.log('Fetched user flags:', flags);
+    } catch (err) {
+      console.error('Error fetching user flags:', err);
+    }
+  };
+
+  // Add new comment or reply
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newComment.trim() || !user) return;
+
+    setIsSubmitting(true);
+    try {
+      setError(null);
+      const { data, error } = await supabase
+        .from('comments')
+        .insert([
+          {
+            content: newComment,
+            user_id: user.id,
+            parent_id: replyingTo,
+            likes: 0,
+            dislikes: 0
+          }
+        ])
+        .select();
+
+      if (error) throw error;
+      
+      setComments([...(data || []), ...comments]);
+      setNewComment('');
+      setReplyingTo(null);
+    } catch (err) {
+      console.error('Error posting comment:', err);
+      setError('Failed to post comment. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Toggle reply form
+  const handleReplyClick = (commentId: string) => {
+    setReplyingTo(replyingTo === commentId ? null : commentId);
+  };
+
+  // Toggle expanded replies
+  const toggleReplies = (commentId: string) => {
+    setExpandedReplies(prev => ({
+      ...prev,
+      [commentId]: !prev[commentId]
+    }));
+  };
+
+  // Memoized sorted comments
+  const sortedComments = useMemo(() => {
+    const topLevelComments = comments.filter(comment => !comment.parent_id);
+    switch (sortOrder) {
+      case 'oldest':
+        return [...topLevelComments].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      case 'likes':
+        return [...topLevelComments].sort((a, b) => b.likes - a.likes);
+      case 'dislikes':
+        return [...topLevelComments].sort((a, b) => b.dislikes - a.dislikes);
+      case 'latest':
+      default:
+        return [...topLevelComments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    }
+  }, [comments, sortOrder]);
+
+  // Get replies for a comment
+  const getReplies = (commentId: string) => {
+    return comments.filter(comment => comment.parent_id === commentId)
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+  };
+
+  // Handle flagging/unflagging a comment
+  const handleFlagComment = async (commentId: string, flagType: 'inappropriate' | 'spam') => {
+    if (!user) {
+      setError('Please sign in to flag comments.');
+      return;
+    }
+    setError(null);
+    setOpenFlagMenu(null); // Close menu
+
+    const currentFlag = userFlags[commentId];
+
+    try {
+      if (currentFlag) {
+        // Already flagged, so unflag (delete)
+        console.log(`Unflagging comment ${commentId}`);
+        const { error } = await supabase
+          .from('flags')
+          .delete()
+          .match({ user_id: user.id, comment_id: commentId });
+        if (error) throw error;
+        // Update local state
+        setUserFlags(prev => {
+          const newState = { ...prev };
+          delete newState[commentId];
+          return newState;
+        });
+      } else {
+        // Not flagged, so flag (insert)
+        console.log(`Flagging comment ${commentId} as ${flagType}`);
+        const { error } = await supabase
+          .from('flags')
+          .insert({ user_id: user.id, comment_id: commentId, flag_type: flagType });
+        if (error) throw error;
+        // Update local state
+        setUserFlags(prev => ({ ...prev, [commentId]: flagType }));
+      }
+    } catch (err: any) {
+      console.error('Error flagging comment:', err);
+      setError(err.message || 'Failed to update flag. Please try again.');
+    }
+  };
+
+  // Render a comment and its replies
+  const renderComment = (comment: Comment, level: number = 0) => {
+    const replies = getReplies(comment.id);
+    const hasReplies = replies.length > 0;
+    const isExpanded = expandedReplies[comment.id];
+    const isFlaggedByUser = !!userFlags[comment.id];
+    const isOwner = user?.id === comment.user_id;
+    const isEditing = editingCommentId === comment.id;
+
+    const displayName = comment.user?.user_metadata?.display_name || comment.user?.email || 'Anonymous';
+    const avatarUrl = comment.user?.user_metadata?.avatar_url;
+    const fallbackInitial = displayName.charAt(0).toUpperCase();
+
+    return (
+      <div key={comment.id} className={`flex gap-4 ${level > 0 ? 'ml-8' : ''}`}>
+        {/* Avatar Column */}
+        <div className="flex-shrink-0">
+          <div className="w-10 h-10 rounded-full overflow-hidden bg-white/10 flex items-center justify-center">
+            {avatarUrl ? (
+              <img src={avatarUrl} alt={`${displayName}'s avatar`} className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-lg font-medium text-white/80">{fallbackInitial}</span>
+            )}
+          </div>
+        </div>
+
+        {/* Comment Column */}
+        <div className="flex-grow space-y-4">
+          <div className="border border-white/10 rounded-lg p-4 bg-white/5 relative group">
+            {/* Top Right Actions (Flag, Edit, Delete) */} 
+            {user && (
+              <div className="absolute top-1 right-1 flex items-center gap-1">
+                {/* Edit Button (only if owner) */} 
+                {isOwner && !isEditing && (
+                  <button
+                    onClick={() => handleEditClick(comment)}
+                    className="p-1.5 rounded-full text-white/50 hover:text-white hover:bg-white/10 transition-colors"
+                    title="Edit comment"
+                  >
+                    <Edit className="w-4 h-4" />
+                  </button>
+                )}
+                {/* Delete Button (only if owner) */} 
+                {isOwner && !isEditing && (
+                  <button
+                    onClick={() => handleDeleteClick(comment.id)}
+                    className="p-1.5 rounded-full text-red-500/60 hover:text-red-500 hover:bg-white/10 transition-colors"
+                    title="Delete comment"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+                {/* Flag Button and Dropdown */} 
+                {!isEditing && ( // Don't show flag while editing
+                  <div className="relative"> {/* Relative container for dropdown positioning */}
+                    <button
+                      onClick={() => setOpenFlagMenu(openFlagMenu === comment.id ? null : comment.id)}
+                      className={`p-1.5 rounded-full text-white/50 hover:text-white hover:bg-white/10 transition-colors ${userFlags[comment.id] ? 'text-yellow-500' : ''}`}
+                      title={userFlags[comment.id] ? `You flagged this as ${userFlags[comment.id]}` : 'Flag comment'}
+                    >
+                      <Flag className="w-4 h-4" />
+                    </button>
+                    {openFlagMenu === comment.id && (
+                      <div className="absolute top-full right-0 mt-1 w-44 bg-white/10 border border-white/20 rounded-lg shadow-lg z-20 py-1">
+                        <button onClick={() => handleFlagComment(comment.id, 'inappropriate')} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/20 flex items-center gap-2">
+                          Inappropriate
+                        </button>
+                        <button onClick={() => handleFlagComment(comment.id, 'spam')} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/20 flex items-center gap-2">
+                          Spam
+                        </button>
+                        {isFlaggedByUser && (
+                          <>
+                            <div className="h-px bg-white/10 mx-2 my-1"></div>
+                            <button onClick={() => handleFlagComment(comment.id, 'inappropriate')} className="w-full text-left px-3 py-1.5 text-sm text-red-400 hover:bg-white/20 flex items-center gap-2">
+                              Unflag
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-between items-start mb-2">
+              <div>
+                <span className="font-medium text-white/90">
+                  {displayName}
+                </span>
+                <span className="text-white/60 text-sm ml-2">
+                  {new Date(comment.created_at).toLocaleDateString()}
+                  {comment.updated_at && new Date(comment.updated_at).getTime() > new Date(comment.created_at).getTime() + 1000 && (
+                    <span className="text-xs italic text-white/50 ml-1">(edited)</span>
+                  )}
+                </span>
+              </div>
+            </div>
+
+            {/* Content or Edit Form */}
+            {isEditing ? (
+              <div className="space-y-2">
+                <textarea
+                  value={editingContent}
+                  onChange={(e) => setEditingContent(e.target.value)}
+                  className="w-full p-2 border border-white/20 rounded-lg bg-white/10 text-white placeholder-white/40 focus:outline-none focus:ring-1 focus:ring-primary/50 text-sm"
+                  rows={3}
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={handleCancelEdit}
+                    className="text-xs text-white/60 hover:text-white px-2 py-1 rounded transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleUpdateComment}
+                    disabled={isUpdatingComment || !editingContent.trim()}
+                    className="text-xs bg-primary/80 hover:bg-primary text-white px-3 py-1 rounded disabled:opacity-50 transition-colors"
+                  >
+                    {isUpdatingComment ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="mb-2 text-white/90 whitespace-pre-wrap">{comment.content}</p>
+            )}
+
+            {/* Bottom Actions (Vote, Reply, Toggle) */} 
+            {!isEditing && (
+              <div className="flex items-center space-x-4 mt-2"> {/* Added mt-2 for spacing */}
+                <button
+                  onClick={() => handleVote(comment.id, 'like')}
+                  className={`flex items-center gap-1 text-green-500 hover:text-green-400 transition-colors ${
+                    userVotes[comment.id] === 'like' ? 'text-green-400' : ''
+                  }`}
+                >
+                  <ThumbsUp className="w-4 h-4" /> {comment.likes}
+                </button>
+                <button
+                  onClick={() => handleVote(comment.id, 'dislike')}
+                  className={`flex items-center gap-1 text-red-500 hover:text-red-400 transition-colors ${
+                    userVotes[comment.id] === 'dislike' ? 'text-red-400' : ''
+                  }`}
+                >
+                  <ThumbsDown className="w-4 h-4" /> {comment.dislikes}
+                </button>
+                {user && (
+                  <button
+                    onClick={() => handleReplyClick(comment.id)}
+                    className="text-white/60 hover:text-white transition-colors flex items-center gap-1 text-sm"
+                    title="Reply"
+                  >
+                    <Reply className="w-4 h-4" />
+                    Reply
+                  </button>
+                )}
+                {hasReplies && (
+                  <button
+                    onClick={() => toggleReplies(comment.id)}
+                    className="text-white/60 hover:text-white transition-colors flex items-center gap-1 text-sm"
+                  >
+                    {isExpanded ? (
+                      <ChevronUp className="w-4 h-4" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4" />
+                    )}
+                    {replies.length} {replies.length === 1 ? 'Reply' : 'Replies'}
+                  </button>
+                )}
+              </div>
+            )}
+            
+            {/* Reply Form */} 
+            {replyingTo === comment.id && !isEditing && (
+              <form onSubmit={handleSubmit} className="mt-4">
+                <div className="mb-4">
+                  <textarea
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    placeholder="Write a reply..."
+                    className="w-full p-3 border border-white/10 rounded-lg bg-white/5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    rows={3}
+                    required
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                  >
+                    {isSubmitting ? 'Posting...' : 'Post Reply'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReplyingTo(null)}
+                    className="text-white/60 hover:text-white px-4 py-2 rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+          {hasReplies && isExpanded && (
+            <div className="space-y-4">
+              {replies.map(reply => renderComment(reply, level + 1))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Vote on comment
+  const handleVote = async (commentId: string, type: 'like' | 'dislike') => {
+    if (!user) {
+      setError('Please sign in to vote');
+      return;
+    }
+
+    try {
+      setError(null);
+      const comment = comments.find(c => c.id === commentId);
+      if (!comment) return;
+
+      // Check if user has already voted
+      const currentVote = userVotes[commentId];
+      if (currentVote === type) {
+        // If clicking the same vote type, remove the vote
+        const { error: deleteError } = await supabase
+          .from('votes')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('comment_id', commentId);
+
+        if (deleteError) throw deleteError;
+
+        // Update comment counts
+        const { error: updateError } = await supabase
+          .from('comments')
+          .update({
+            [type + 's']: comment[type + 's'] - 1
+          })
+          .eq('id', commentId);
+
+        if (updateError) throw updateError;
+
+        // Update local state
+        const newVotes = { ...userVotes };
+        delete newVotes[commentId];
+        setUserVotes(newVotes);
+      } else if (currentVote) {
+        // If changing vote type, update the vote
+        const { error: updateError } = await supabase
+          .from('votes')
+          .update({ vote_type: type })
+          .eq('user_id', user.id)
+          .eq('comment_id', commentId);
+
+        if (updateError) throw updateError;
+
+        // Update comment counts
+        const { error: commentError } = await supabase
+          .from('comments')
+          .update({
+            [currentVote + 's']: comment[currentVote + 's'] - 1,
+            [type + 's']: comment[type + 's'] + 1
+          })
+          .eq('id', commentId);
+
+        if (commentError) throw commentError;
+
+        // Update local state
+        setUserVotes({ ...userVotes, [commentId]: type });
+      } else {
+        // If no previous vote, create new vote
+        const { error: insertError } = await supabase
+          .from('votes')
+          .insert([
+            {
+              user_id: user.id,
+              comment_id: commentId,
+              vote_type: type
+            }
+          ]);
+
+        if (insertError) throw insertError;
+
+        // Update comment counts
+        const { error: updateError } = await supabase
+          .from('comments')
+          .update({
+            [type + 's']: comment[type + 's'] + 1
+          })
+          .eq('id', commentId);
+
+        if (updateError) throw updateError;
+
+        // Update local state
+        setUserVotes({ ...userVotes, [commentId]: type });
+      }
+
+      // Refresh comments to get updated counts
+      fetchComments();
+    } catch (err) {
+      console.error('Error voting:', err);
+      setError('Failed to vote. Please try again.');
+    }
+  };
+
+  // Handle profile update
+  const handleProfileUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+
+    setIsUpdatingProfile(true);
+    try {
+      setError(null);
+      
+      // Upload avatar if selected
+      let avatarPath = null;
+      if (avatarFile) {
+        const fileExt = avatarFile.name.split('.').pop();
+        const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+        
+        // Upload the file
+        const { error: uploadError, data } = await supabase.storage
+          .from('avatars')
+          .upload(fileName, avatarFile, {
+            cacheControl: '3600',
+            upsert: true
+          });
+
+        if (uploadError) {
+          console.error('Upload error:', uploadError);
+          throw new Error('Failed to upload avatar. Please try again.');
+        }
+
+        // Get the public URL
+        const { data: { publicUrl } } = supabase.storage
+          .from('avatars')
+          .getPublicUrl(fileName);
+
+        avatarPath = publicUrl;
+      }
+
+      // Update profile
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({
+          user_metadata: {
+            ...user.user_metadata,
+            display_name: newDisplayName || user.user_metadata?.display_name,
+            avatar_url: avatarPath || user.user_metadata?.avatar_url
+          }
+        })
+        .eq('id', user.id);
+
+      if (updateError) {
+        console.error('Update error:', updateError);
+        throw new Error('Failed to update profile. Please try again.');
+      }
+
+      // Update local user state
+      const updatedMetadata = {
+        ...user.user_metadata,
+        display_name: newDisplayName || user.user_metadata?.display_name,
+        avatar_url: avatarPath || user.user_metadata?.avatar_url
+      };
+      setUser({
+        ...user,
+        user_metadata: updatedMetadata
+      });
+
+      setShowSettings(false);
+      setNewDisplayName('');
+      setAvatarFile(null);
+      setAvatarUrl(null);
+    } catch (err) {
+      console.error('Error updating profile:', err);
+      setError(err instanceof Error ? err.message : 'Failed to update profile. Please try again.');
+    } finally {
+      setIsUpdatingProfile(false);
+    }
+  };
+
+  // Handle avatar file selection
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setAvatarFile(e.target.files[0]);
+      setAvatarUrl(URL.createObjectURL(e.target.files[0]));
+    }
+  };
+
+  // Open Settings Modal and pre-populate fields
+  const openSettingsModal = () => {
+    console.log('[DEBUG] openSettingsModal called. isCommentsCollapsed:', isCommentsCollapsed);
+    if (isCommentsCollapsed) {
+      console.log('[DEBUG] Expanding comments...');
+      setIsCommentsCollapsed(false);
+    }
+    if (!user) {
+      console.error('[DEBUG] Attempted to open settings modal without user.');
+      return;
+    }
+    console.log('[DEBUG] Opening settings with user:', JSON.stringify(user)); // Stringify user for better logging
+    setNewDisplayName(user.user_metadata?.display_name || '');
+    setAvatarUrl(user.user_metadata?.avatar_url || null);
+    setAvatarFile(null);
+    console.log('[DEBUG] Setting showSettings to true');
+    setShowSettings(true);
+  };
+
+  // Handle Password Reset
+  const handlePasswordReset = async () => {
+    if (!email) {
+      setResetMessage('Please enter your email address first.');
+      return;
+    }
+    setIsResettingPassword(true);
+    setResetMessage(null); // Clear previous messages
+    setError(null); // Clear general errors
+    try {
+      console.log(`Attempting password reset for: ${email}`);
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/update-password`, // Redirect URL after clicking link
+      });
+      if (resetError) throw resetError;
+      setResetMessage('Password reset email sent! Check your inbox (and spam folder).');
+    } catch (err: any) {
+      console.error('Error sending password reset email:', err);
+      setResetMessage(err.message || 'Failed to send password reset email.');
+    } finally {
+      setIsResettingPassword(false);
+    }
+  };
+
+  // Handle initiating comment edit
+  const handleEditClick = (comment: Comment) => {
+    setEditingCommentId(comment.id);
+    setEditingContent(comment.content);
+    setOpenFlagMenu(null); // Close other menus
+  };
+
+  // Handle cancelling comment edit
+  const handleCancelEdit = () => {
+    setEditingCommentId(null);
+    setEditingContent('');
+  };
+
+  // Handle submitting comment update
+  const handleUpdateComment = async () => {
+    if (!editingCommentId || !editingContent.trim()) return;
+    setIsUpdatingComment(true);
+    setError(null);
+    try {
+      const { error } = await supabase
+        .from('comments')
+        .update({ content: editingContent, updated_at: new Date().toISOString() })
+        .eq('id', editingCommentId);
+
+      if (error) throw error;
+
+      // Update local state
+      setComments(prevComments =>
+        prevComments.map(c =>
+          c.id === editingCommentId ? { ...c, content: editingContent, updated_at: new Date().toISOString() } : c
+        )
+      );
+      handleCancelEdit(); // Close edit form
+    } catch (err: any) {
+      console.error('Error updating comment:', err);
+      setError(err.message || 'Failed to update comment.');
+    } finally {
+      setIsUpdatingComment(false);
+    }
+  };
+
+  // Handle initiating comment delete (show modal)
+  const handleDeleteClick = (commentId: string) => {
+    setShowDeleteConfirmModal(commentId);
+    setOpenFlagMenu(null); // Close other menus
+  };
+
+  // Handle cancelling comment delete (close modal)
+  const handleCancelDelete = () => {
+    setShowDeleteConfirmModal(null);
+  };
+
+  // Handle confirming comment delete
+  const handleConfirmDelete = async () => {
+    if (!showDeleteConfirmModal) return;
+    setIsDeletingComment(true);
+    setError(null);
+    try {
+      const commentIdToDelete = showDeleteConfirmModal;
+      const { error } = await supabase
+        .from('comments')
+        .delete()
+        .eq('id', commentIdToDelete);
+
+      if (error) throw error;
+
+      // Remove comment and its replies from local state
+      setComments(prevComments => {
+        const commentIdsToDelete = new Set<string>([commentIdToDelete]);
+        let changed = true;
+        // Recursively find all child IDs (could be optimized for very deep nesting)
+        while (changed) {
+          changed = false;
+          const currentSize = commentIdsToDelete.size;
+          prevComments.forEach(c => {
+            if (c.parent_id && commentIdsToDelete.has(c.parent_id) && !commentIdsToDelete.has(c.id)) {
+              commentIdsToDelete.add(c.id);
+              changed = true;
+            }
+          });
+          if (commentIdsToDelete.size === currentSize) changed = false;
+        }
+        return prevComments.filter(c => !commentIdsToDelete.has(c.id));
+      });
+
+      handleCancelDelete(); // Close modal
+    } catch (err: any) {
+      console.error('Error deleting comment:', err);
+      setError(err.message || 'Failed to delete comment.');
+    } finally {
+      setIsDeletingComment(false);
+    }
+  };
+
+  return (
+    <div className="max-w-5xl mx-auto px-2 sm:px-6">
+      <div className="bg-white/5 backdrop-blur-xl rounded-lg overflow-hidden shadow-lg mx-2 sm:mx-8 md:mx-0 glass-morphism">
+        <div className="p-6">
+          {/* Header Section */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4 mb-6">
+            {/* Title, Collapse Toggle, and Sort Dropdown */}
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setIsCommentsCollapsed(!isCommentsCollapsed)}
+                className="p-1 text-white/60 hover:text-white hover:bg-white/10 rounded-full transition-colors"
+                title={isCommentsCollapsed ? 'Expand comments' : 'Collapse comments'}
+              >
+                {isCommentsCollapsed ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}
+              </button>
+              <h2 className="text-2xl font-bold">Comments</h2>
+              {/* Conditionally render Sort button/dropdown */}
+              {!isCommentsCollapsed && (
+                <div className="relative ml-2"> {/* Added ml-2 for spacing */} 
+                  <button
+                    onClick={() => setShowSortDropdown(!showSortDropdown)}
+                    className="flex items-center gap-1 text-sm text-white/60 hover:text-white transition-colors border border-white/10 px-3 py-1 rounded-lg"
+                  >
+                    Sort By: {sortOrder.charAt(0).toUpperCase() + sortOrder.slice(1)}
+                    <ChevronDown className={`w-4 h-4 transition-transform ${showSortDropdown ? 'rotate-180' : ''}`} />
+                  </button>
+                  {showSortDropdown && (
+                    <div className="absolute top-full left-0 mt-1 w-44 bg-white/10 border border-white/20 rounded-lg shadow-lg z-10 py-1">
+                      <button onClick={() => { setSortOrder('latest'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/20 flex items-center gap-2"><SortDesc className='w-4 h-4'/> Latest</button>
+                      <button onClick={() => { setSortOrder('oldest'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/20 flex items-center gap-2"><SortAsc className='w-4 h-4'/> Oldest</button>
+                      <button onClick={() => { setSortOrder('likes'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/20 flex items-center gap-2"><ThumbsUp className='w-4 h-4'/> Most Upvoted</button>
+                      <button onClick={() => { setSortOrder('dislikes'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/20 flex items-center gap-2"><ThumbsDown className='w-4 h-4'/> Most Downvoted</button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            {/* User Actions */}
+            {isLoading ? (
+              <div className="text-sm text-white/60 animate-pulse">Loading user...</div>
+            ) : user ? (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <span className="text-sm text-white/60 whitespace-nowrap">
+                  Signed in as {user.user_metadata?.display_name || user.email}
+                </span>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={openSettingsModal}
+                    className="text-sm text-white/60 hover:text-white transition-colors flex items-center gap-1 bg-white/10 hover:bg-white/20 px-2 py-1 rounded-md"
+                  >
+                    <Settings className="w-4 h-4" />
+                    <span>Settings</span>
+                  </button>
+                  <button
+                    onClick={handleSignOut}
+                    className="text-sm text-white/60 hover:text-white transition-colors flex items-center gap-1 bg-white/10 hover:bg-white/20 px-2 py-1 rounded-md"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span>Sign Out</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => { 
+                    if (isCommentsCollapsed) setIsCommentsCollapsed(false); // Expand if collapsed
+                    setShowSignUp(false); 
+                    setShowAuthForm(true); 
+                  }}
+                  className="text-sm text-white/60 hover:text-white transition-colors flex items-center gap-1 bg-white/10 hover:bg-white/20 px-2 py-1 rounded-md"
+                >
+                  <LogIn className="w-4 h-4" />
+                  Sign In
+                </button>
+                <button
+                  onClick={() => { 
+                    if (isCommentsCollapsed) setIsCommentsCollapsed(false); // Expand if collapsed
+                    setShowSignUp(true); 
+                    setShowAuthForm(true); 
+                  }}
+                  className="text-sm text-white/60 hover:text-white transition-colors flex items-center gap-1 bg-white/10 hover:bg-white/20 px-2 py-1 rounded-md"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  Sign Up
+                </button>
+              </div>
+            )}
+          </div>
+          
+          {/* Collapsible Content Area */} 
+          {!isCommentsCollapsed && (
+            <>
+              {/* Auth Forms */}
+              {!user && showAuthForm && (
+                <form onSubmit={showSignUp ? handleSignUp : handleSignIn} className="mb-8">
+                  <div className="space-y-4">
+                    {showSignUp && (
+                      <div>
+                        <input
+                          type="text"
+                          value={displayName}
+                          onChange={(e) => setDisplayName(e.target.value)}
+                          placeholder="Display Name"
+                          className="w-full p-3 border border-white/10 rounded-lg bg-white/5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50"
+                          required={showSignUp}
+                        />
+                      </div>
+                    )}
+                    <div>
+                      <label htmlFor="email-input" className="sr-only">Email</label>
+                      <input
+                        id="email-input"
+                        type="email"
+                        value={email}
+                        onChange={(e) => {
+                          setEmail(e.target.value);
+                          setResetMessage(null); // Clear reset message when email changes
+                          setError(null); // Clear general error when email changes
+                        }}
+                        placeholder="Email"
+                        className="w-full p-3 border border-white/10 rounded-lg bg-white/5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        required
+                        autoComplete="email"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="password-input" className="sr-only">Password</label>
+                      <input
+                        id="password-input"
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="Password"
+                        className="w-full p-3 border border-white/10 rounded-lg bg-white/5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        required={!isResettingPassword && !showSignUp} // Password not required if just resetting on sign-in form
+                        autoComplete={showSignUp ? "new-password" : "current-password"}
+                      />
+                    </div>
+
+                    {/* Forgot Password Link (only shows on Sign In form) */}
+                    {!showSignUp && (
+                      <div className="text-right -mt-2 mb-2"> {/* Adjusted margin */}
+                        <button
+                          type="button"
+                          onClick={handlePasswordReset}
+                          disabled={isResettingPassword}
+                          className="text-sm text-primary/80 hover:text-primary disabled:opacity-50 transition-colors"
+                        >
+                          {isResettingPassword ? 'Sending...' : 'Forgot Password?'}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Display Reset Message */}
+                    {resetMessage && (
+                      <div className={`text-sm p-3 rounded-lg ${resetMessage.includes('sent') ? 'bg-green-500/10 text-green-300 border border-green-500/20' : 'bg-red-500/10 text-red-300 border border-red-500/20'}`}>
+                        {resetMessage}
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      // Conditionally disable if resetting password to avoid accidental submission
+                      disabled={isSigningIn || isSigningUp || (isResettingPassword && !showSignUp)}
+                      className="w-full bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+                    >
+                      {isSigningIn ? 'Signing in...' : isSigningUp ? 'Signing up...' : showSignUp ? 'Sign Up' : 'Sign In'}
+                    </button>
+                  </div>
+                  {/* Display general errors */}
+                  {error && !resetMessage && ( // Don't show general error if reset message is showing
+                    <div className="mt-4 text-sm p-3 rounded-lg bg-red-500/10 text-red-300 border border-red-500/20">
+                      {error}
+                    </div>
+                  )}
+                </form>
+              )}
+              
+              {/* Comment Form */}
+              {user && !replyingTo && !editingCommentId && ( // Ensure editing doesn't show main form
+                <form onSubmit={handleSubmit} className="mb-8">
+                  <div className="mb-4">
+                    <textarea
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      placeholder="Write a comment..."
+                      className="w-full p-3 border border-white/10 rounded-lg bg-white/5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      rows={3}
+                      required
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                  >
+                    {isSubmitting ? 'Posting...' : 'Post Comment'}
+                  </button>
+                </form>
+              )}
+
+              {/* Comments List & Show More */}
+              <div className="space-y-4">
+                {sortedComments.slice(0, visibleCommentCount).map(comment => renderComment(comment))}
+              </div>
+              {visibleCommentCount < sortedComments.length && (
+                <div className="mt-6 text-center">
+                  <button
+                    onClick={() => setVisibleCommentCount(prevCount => prevCount + 5)}
+                    className="bg-white/10 hover:bg-white/20 text-white/80 hover:text-white px-4 py-2 rounded-lg transition-colors text-sm"
+                  >
+                    Show More Comments ({sortedComments.length - visibleCommentCount} remaining)
+                  </button>
+                </div>
+              )}
+
+              {/* Error Display */}
+              {error && (
+                <div className={`text-sm p-3 rounded-lg mt-6 ${resetMessage?.includes('sent') ? 'bg-green-500/10 text-green-300 border border-green-500/20' : 'bg-red-500/10 text-red-300 border border-red-500/20'}`}>
+                  {error || resetMessage}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white/10 backdrop-blur-xl rounded-lg p-6 max-w-md w-full mx-4 shadow-lg">
+            {/* Modal Header */}
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold">Profile Settings</h3>
+              <button
+                onClick={() => {
+                  console.log("[DEBUG] Close button clicked in Settings Modal")
+                  setShowSettings(false)
+                }}
+                className="text-white/60 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {/* Modal Form Content (Restored) */}
+            <form onSubmit={handleProfileUpdate} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1 text-white/80">Display Name</label>
+                <input
+                  type="text"
+                  value={newDisplayName}
+                  onChange={(e) => setNewDisplayName(e.target.value)}
+                  placeholder={user?.user_metadata?.display_name || 'Enter display name'}
+                  className="w-full p-3 border border-white/10 rounded-lg bg-white/5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1 text-white/80">Avatar</label>
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-full overflow-hidden bg-white/10">
+                    {avatarUrl ? (
+                      <img src={avatarUrl} alt="Avatar preview" className="w-full h-full object-cover" />
+                    ) : user?.user_metadata?.avatar_url ? (
+                      <img src={user.user_metadata.avatar_url} alt="Current avatar" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-white/60 text-xs">
+                        No avatar
+                      </div>
+                    )}
+                  </div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleAvatarChange}
+                    className="hidden"
+                    id="avatar-upload"
+                  />
+                  <label
+                    htmlFor="avatar-upload"
+                    className="px-4 py-2 bg-white/10 rounded-lg text-white/60 hover:text-white transition-colors cursor-pointer text-sm"
+                  >
+                    {avatarFile ? 'Change Avatar' : 'Upload Avatar'}
+                  </label>
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSettings(false)}
+                  className="px-4 py-2 text-white/70 hover:text-white transition-colors rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingProfile}
+                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+                >
+                  {isUpdatingProfile ? (
+                     <>Saving...</> // Add spinner maybe?
+                  ) : (
+                    <><Save className="w-4 h-4"/>Save Changes</>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirmModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white/10 backdrop-blur-xl rounded-lg p-6 max-w-md w-full mx-4 shadow-lg">
+            <div className="flex items-center gap-3 mb-4">
+              <AlertTriangle className="w-6 h-6 text-red-400 flex-shrink-0" />
+              <h3 className="text-xl font-semibold text-white">Delete Comment?</h3>
+            </div>
+            <p className="text-white/70 mb-6">Are you sure you want to permanently delete this comment and all its replies? This action cannot be undone.</p>
+            <div className="flex justify-end gap-3">
+              {/* Keep distinct button colors but maybe match padding/shape */}
+              <button
+                onClick={handleCancelDelete}
+                className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white/80 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                disabled={isDeletingComment}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+              >
+                {isDeletingComment ? (
+                  <>Deleting...</>
+                ) : (
+                  <><Trash2 className="w-4 h-4"/>Delete</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+} 
