@@ -77,6 +77,9 @@ export default function Comments() {
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [sortOrder, setSortOrder] = useState<SortOrder>('latest');
   const [showSortDropdown, setShowSortDropdown] = useState(false);
   const [isResettingPassword, setIsResettingPassword] = useState(false);
@@ -349,11 +352,37 @@ export default function Comments() {
         }
       }
 
-      // Combine comments with user data
+      // Fetch all votes for these comments
+      const { data: votesData, error: votesError } = await supabase
+        .from('votes')
+        .select('*')
+        .in('comment_id', commentsData.map(c => c.id));
+
+      if (votesError) {
+        console.error('Error fetching votes:', votesError);
+      }
+
+      // Calculate vote counts for each comment
+      const voteCounts: Record<string, { likes: number, dislikes: number }> = {};
+      votesData?.forEach((vote: Vote) => {
+        if (!voteCounts[vote.comment_id]) {
+          voteCounts[vote.comment_id] = { likes: 0, dislikes: 0 };
+        }
+        if (vote.vote_type === 'like') {
+          voteCounts[vote.comment_id].likes++;
+        } else {
+          voteCounts[vote.comment_id].dislikes++;
+        }
+      });
+
+      // Combine comments with user data and vote counts
       const commentsWithUsers = commentsData.map(comment => ({
         ...comment,
         // Find profile if user_id exists, otherwise user is undefined
-        user: comment.user_id ? usersData.find(profile => profile.id === comment.user_id) : undefined
+        user: comment.user_id ? usersData.find(profile => profile.id === comment.user_id) : undefined,
+        // Add vote counts
+        likes: voteCounts[comment.id]?.likes || 0,
+        dislikes: voteCounts[comment.id]?.dislikes || 0
       }));
 
       console.log('Setting comments state with combined data.');
@@ -370,12 +399,18 @@ export default function Comments() {
     if (!user) return;
 
     try {
+      console.log('Fetching votes for user:', user.id);
       const { data, error } = await supabase
         .from('votes')
         .select('*')
         .eq('user_id', user.id);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error fetching votes:', error);
+        throw error;
+      }
+
+      console.log('Fetched votes:', data);
 
       // Convert votes array to a record of comment_id -> vote_type
       const votes: Record<string, 'like' | 'dislike'> = {};
@@ -878,47 +913,53 @@ export default function Comments() {
 
             {/* Bottom Actions (Vote, Reply, Toggle) */} 
             {!isEditing && (
-              <div className="flex items-center space-x-4 mt-2"> {/* Added mt-2 for spacing */}
-            <button
-              onClick={() => handleVote(comment.id, 'like')}
+              <div className="flex items-center space-x-4 mt-2">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleVote(comment.id, 'like');
+                  }}
                   className={`flex items-center gap-1 text-green-500 hover:text-green-400 transition-colors ${
-                userVotes[comment.id] === 'like' ? 'text-green-400' : ''
-              }`}
-            >
+                    userVotes[comment.id] === 'like' ? 'text-green-400' : ''
+                  }`}
+                >
                   <ThumbsUp className="w-4 h-4" /> {comment.likes}
-            </button>
-            <button
-              onClick={() => handleVote(comment.id, 'dislike')}
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleVote(comment.id, 'dislike');
+                  }}
                   className={`flex items-center gap-1 text-red-500 hover:text-red-400 transition-colors ${
-                userVotes[comment.id] === 'dislike' ? 'text-red-400' : ''
-              }`}
-            >
+                    userVotes[comment.id] === 'dislike' ? 'text-red-400' : ''
+                  }`}
+                >
                   <ThumbsDown className="w-4 h-4" /> {comment.dislikes}
-            </button>
-            {user && (
-              <button
-                onClick={() => handleReplyClick(comment.id)}
+                </button>
+                {user && (
+                  <button
+                    onClick={() => handleReplyClick(comment.id)}
                     className="text-white/60 hover:text-white transition-colors flex items-center gap-1 text-sm"
                     title="Reply"
-              >
-                <Reply className="w-4 h-4" />
-                Reply
-              </button>
-            )}
-            {hasReplies && (
-              <button
-                onClick={() => toggleReplies(comment.id)}
-                    className="text-white/60 hover:text-white transition-colors flex items-center gap-1 text-sm"
-              >
-                {isExpanded ? (
-                  <ChevronUp className="w-4 h-4" />
-                ) : (
-                  <ChevronDown className="w-4 h-4" />
+                  >
+                    <Reply className="w-4 h-4" />
+                    Reply
+                  </button>
                 )}
-                {replies.length} {replies.length === 1 ? 'Reply' : 'Replies'}
-              </button>
-            )}
-          </div>
+                {hasReplies && (
+                  <button
+                    onClick={() => toggleReplies(comment.id)}
+                    className="text-white/60 hover:text-white transition-colors flex items-center gap-1 text-sm"
+                  >
+                    {isExpanded ? (
+                      <ChevronUp className="w-4 h-4" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4" />
+                    )}
+                    {replies.length} {replies.length === 1 ? 'Reply' : 'Replies'}
+                  </button>
+                )}
+              </div>
             )}
             
             {/* Reply Form */} 
@@ -972,30 +1013,33 @@ export default function Comments() {
 
     try {
       setError(null);
+      console.log('Attempting to vote:', { commentId, type, userId: user.id });
+      
       const comment = comments.find(c => c.id === commentId);
-      if (!comment) return;
+      if (!comment) {
+        console.error('Comment not found:', commentId);
+        return;
+      }
 
       // Check if user has already voted
       const currentVote = userVotes[commentId];
+      console.log('Current vote state:', { currentVote, userVotes });
+
       if (currentVote === type) {
         // If clicking the same vote type, remove the vote
-        const { error: deleteError } = await supabase
+        console.log('Removing vote');
+        const { data: deleteData, error: deleteError } = await supabase
           .from('votes')
           .delete()
           .eq('user_id', user.id)
-          .eq('comment_id', commentId);
+          .eq('comment_id', commentId)
+          .select();
 
-        if (deleteError) throw deleteError;
-
-        // Update comment counts
-        const { error: updateError } = await supabase
-          .from('comments')
-          .update({
-            [type + 's']: comment[type + 's'] - 1
-          })
-          .eq('id', commentId);
-
-        if (updateError) throw updateError;
+        if (deleteError) {
+          console.error('Error deleting vote:', deleteError);
+          throw deleteError;
+        }
+        console.log('Delete vote response:', deleteData);
 
         // Update local state
         const newVotes = { ...userVotes };
@@ -1003,30 +1047,26 @@ export default function Comments() {
         setUserVotes(newVotes);
       } else if (currentVote) {
         // If changing vote type, update the vote
-        const { error: updateError } = await supabase
+        console.log('Updating vote from', currentVote, 'to', type);
+        const { data: updateData, error: updateError } = await supabase
           .from('votes')
           .update({ vote_type: type })
           .eq('user_id', user.id)
-          .eq('comment_id', commentId);
+          .eq('comment_id', commentId)
+          .select();
 
-        if (updateError) throw updateError;
-
-        // Update comment counts
-        const { error: commentError } = await supabase
-          .from('comments')
-          .update({
-            [currentVote + 's']: comment[currentVote + 's'] - 1,
-            [type + 's']: comment[type + 's'] + 1
-          })
-          .eq('id', commentId);
-
-        if (commentError) throw commentError;
+        if (updateError) {
+          console.error('Error updating vote:', updateError);
+          throw updateError;
+        }
+        console.log('Update vote response:', updateData);
 
         // Update local state
         setUserVotes({ ...userVotes, [commentId]: type });
       } else {
         // If no previous vote, create new vote
-        const { error: insertError } = await supabase
+        console.log('Creating new vote');
+        const { data: insertData, error: insertError } = await supabase
           .from('votes')
           .insert([
             {
@@ -1034,19 +1074,14 @@ export default function Comments() {
               comment_id: commentId,
               vote_type: type
             }
-          ]);
+          ])
+          .select();
 
-        if (insertError) throw insertError;
-
-        // Update comment counts
-        const { error: updateError } = await supabase
-          .from('comments')
-          .update({
-            [type + 's']: comment[type + 's'] + 1
-          })
-          .eq('id', commentId);
-
-        if (updateError) throw updateError;
+        if (insertError) {
+          console.error('Error inserting vote:', insertError);
+          throw insertError;
+        }
+        console.log('Insert vote response:', insertData);
 
         // Update local state
         setUserVotes({ ...userVotes, [commentId]: type });
@@ -1285,6 +1320,63 @@ export default function Comments() {
     }
   };
 
+  // Handle account deletion
+  const handleDeleteAccount = async () => {
+    if (!user || deleteConfirmation !== 'DELETE') return;
+    
+    setIsDeletingAccount(true);
+    setError(null);
+    
+    try {
+      // First delete all comments by this user
+      const { error: commentsError } = await supabase
+        .from('comments')
+        .delete()
+        .eq('user_id', user.id);
+      
+      if (commentsError) throw commentsError;
+
+      // Delete all flags by this user
+      const { error: flagsError } = await supabase
+        .from('flags')
+        .delete()
+        .eq('user_id', user.id);
+      
+      if (flagsError) throw flagsError;
+
+      // Delete all votes by this user
+      const { error: votesError } = await supabase
+        .from('votes')
+        .delete()
+        .eq('user_id', user.id);
+      
+      if (votesError) throw votesError;
+
+      // Delete the user's profile
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .delete()
+        .eq('id', user.id);
+      
+      if (profileError) throw profileError;
+
+      // Finally, delete the auth user
+      const { error: authError } = await supabase.auth.admin.deleteUser(user.id);
+      
+      if (authError) throw authError;
+
+      // Close modals and sign out
+      setShowDeleteAccountModal(false);
+      setShowSettings(false);
+      setUser(null);
+    } catch (err) {
+      console.error('Error deleting account:', err);
+      setError('Failed to delete account. Please try again.');
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  };
+
   // Add click outside handler for sort dropdown
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -1405,7 +1497,20 @@ export default function Comments() {
                             </div>
                           )}
                         </div>
-                        <span className="text-center font-medium">{user.user_metadata?.display_name || user.email}</span>
+                        <span className="text-center font-medium text-base text-white/90">{user.user_metadata?.display_name || user.email}</span>
+                        <div className="flex items-center gap-1.5 text-xs">
+                          {user.user_metadata?.user_type === 'admin' ? (
+                            <>
+                              <Star className="w-3.5 h-3.5 text-yellow-400" />
+                              <span className="text-yellow-400">Admin</span>
+                            </>
+                          ) : (
+                            <>
+                              <User className="w-3.5 h-3.5 text-white/60" />
+                              <span className="text-white/60">User</span>
+                            </>
+                          )}
+                        </div>
                       </div>
                       <button
                         onClick={() => {
@@ -1761,6 +1866,23 @@ export default function Comments() {
                 </button>
               </div>
             </form>
+
+            {/* Danger Zone */}
+            <div className="mt-8 pt-6 border-t border-white/10">
+              <h4 className="text-lg font-semibold text-red-400 mb-4">Danger Zone</h4>
+              <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
+                <h5 className="text-red-400 font-medium mb-2">Delete Account</h5>
+                <p className="text-white/60 text-sm mb-4">
+                  This action cannot be undone. This will permanently delete your account and remove all of your comments and replies. Any replies to your comments will also be deleted.
+                </p>
+                <button
+                  onClick={() => setShowDeleteAccountModal(true)}
+                  className="px-4 py-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition-colors"
+                >
+                  Delete Account
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1793,6 +1915,57 @@ export default function Comments() {
                   <><Trash2 className="w-4 h-4"/>Delete</>
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Account Confirmation Modal */}
+      {showDeleteAccountModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white/10 backdrop-blur-xl rounded-lg p-6 max-w-md w-full mx-4 shadow-lg">
+            <div className="flex items-center gap-3 mb-4">
+              <AlertTriangle className="w-6 h-6 text-red-400 flex-shrink-0" />
+              <h3 className="text-xl font-semibold text-white">Delete Account?</h3>
+            </div>
+            <p className="text-white/70 mb-6">
+              This action cannot be undone. This will permanently delete your account and remove all of your comments and replies. Any replies to your comments will also be deleted.
+            </p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1 text-white/80">
+                  Type DELETE to confirm
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmation}
+                  onChange={(e) => setDeleteConfirmation(e.target.value)}
+                  placeholder="DELETE"
+                  className="w-full p-3 border border-white/10 rounded-lg bg-white/5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-red-500/50"
+                />
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => {
+                    setShowDeleteAccountModal(false);
+                    setDeleteConfirmation('');
+                  }}
+                  className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white/80 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteAccount}
+                  disabled={isDeletingAccount || deleteConfirmation !== 'DELETE'}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+                >
+                  {isDeletingAccount ? (
+                    <>Deleting...</>
+                  ) : (
+                    <><Trash2 className="w-4 h-4"/>Delete Account</>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
