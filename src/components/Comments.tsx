@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { ChevronDown, ChevronUp, Reply, Settings, X, LogOut, SortAsc, SortDesc, ThumbsUp, ThumbsDown, LogIn, UserPlus, Mail, Flag, Edit, Trash2, Save, AlertTriangle, Star, User } from 'lucide-react';
+import { ChevronDown, ChevronUp, Reply, Settings, X, LogOut, SortAsc, SortDesc, ThumbsUp, ThumbsDown, LogIn, UserPlus, Mail, Flag, Edit, Trash2, Save, AlertTriangle, Star, User, MoreVertical, Filter, Pin } from 'lucide-react';
 
 // Types
 interface Comment {
@@ -32,7 +32,8 @@ interface Vote {
 
 interface FlagRecord {
   comment_id: string;
-  flag_type: 'inappropriate' | 'spam';
+  flag_type: 'inappropriate' | 'spam' | 'pinned';
+  count?: number;
 }
 
 // Supabase client
@@ -43,7 +44,14 @@ if (!supabaseUrl || !supabaseKey) {
   throw new Error('Missing Supabase environment variables. Please check your .env.local file.');
 }
 
-const supabase = createClient(supabaseUrl, supabaseKey);
+console.log('Supabase URL:', supabaseUrl);
+console.log('Supabase Key length:', supabaseKey.length);
+
+const supabase = createClient(supabaseUrl, supabaseKey, {
+  db: {
+    schema: 'public'
+  }
+});
 
 // Define Sort Orders
 type SortOrder = 'latest' | 'oldest' | 'likes' | 'dislikes' | 'flagged';
@@ -75,7 +83,7 @@ export default function Comments() {
   const [resetMessage, setResetMessage] = useState<string | null>(null);
   const [showAuthForm, setShowAuthForm] = useState(false);
   const [visibleCommentCount, setVisibleCommentCount] = useState(3);
-  const [userFlags, setUserFlags] = useState<Record<string, 'inappropriate' | 'spam'>>({});
+  const [userFlags, setUserFlags] = useState<Record<string, { type: 'inappropriate' | 'spam' | 'pinned', count: number }>>({});
   const [openFlagMenu, setOpenFlagMenu] = useState<string | null>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState<string>('');
@@ -83,6 +91,7 @@ export default function Comments() {
   const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState<string | null>(null);
   const [isDeletingComment, setIsDeletingComment] = useState(false);
   const [isCommentsCollapsed, setIsCommentsCollapsed] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
 
   // Check user authentication and set up session listener
   useEffect(() => {
@@ -165,68 +174,68 @@ export default function Comments() {
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setResetMessage(null); // Clear reset message on sign-in attempt
-    setError(null);
-    
-    console.log('Signing in...');
-    
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password
-    });
+      setError(null);
+      
+      console.log('Signing in...');
+      
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
 
-    if (error) {
-      console.error('Sign in error:', error);
-      if (error.message.includes('Email not confirmed')) {
-        setError('Please confirm your email address before signing in. Check your email for the confirmation link.');
-      } else {
-        setError(error.message);
+      if (error) {
+        console.error('Sign in error:', error);
+        if (error.message.includes('Email not confirmed')) {
+          setError('Please confirm your email address before signing in. Check your email for the confirmation link.');
+        } else {
+          setError(error.message);
+        }
+        return;
       }
-      return;
-    }
 
-    console.log('Sign in successful:', data);
-    setEmail('');
-    setPassword('');
+      console.log('Sign in successful:', data);
+      setEmail('');
+      setPassword('');
   };
 
   // Handle sign up
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setResetMessage(null); // Clear reset message on sign-up attempt
-    setError(null);
-    
-    console.log('Signing up...');
-    
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-        data: {
-          display_name: displayName,
+      setError(null);
+      
+      console.log('Signing up...');
+      
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          data: {
+            display_name: displayName,
           email_confirmed: false,
           user_type: 'regular' // Set default user_type
+          }
         }
+      });
+
+      if (error) {
+        console.error('Sign up error:', error);
+        setError(error.message);
+        return;
       }
-    });
 
-    if (error) {
-      console.error('Sign up error:', error);
-      setError(error.message);
-      return;
-    }
-
-    console.log('Sign up successful:', data);
-    
-    if (data.user?.identities?.length === 0) {
-      setError('This email is already registered. Please sign in instead.');
-    } else {
-      setError('Please check your email for the confirmation link. If you don\'t see it, check your spam folder.');
-    }
-    
-    setEmail('');
-    setPassword('');
-    setDisplayName('');
+      console.log('Sign up successful:', data);
+      
+      if (data.user?.identities?.length === 0) {
+        setError('This email is already registered. Please sign in instead.');
+      } else {
+        setError('Please check your email for the confirmation link. If you don\'t see it, check your spam folder.');
+      }
+      
+      setEmail('');
+      setPassword('');
+      setDisplayName('');
   };
 
   // Handle sign out
@@ -250,19 +259,52 @@ export default function Comments() {
     }
   };
 
+  // Fetch all flags for comments
+  const fetchAllFlags = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('flags')
+        .select('comment_id, flag_type');
+
+      if (error) throw error;
+
+      // Count flags per comment
+      const flagCounts: Record<string, number> = {};
+      const flagTypes: Record<string, 'inappropriate' | 'spam' | 'pinned'> = {};
+      
+      data.forEach((flag: FlagRecord) => {
+        flagCounts[flag.comment_id] = (flagCounts[flag.comment_id] || 0) + 1;
+        flagTypes[flag.comment_id] = flag.flag_type;
+      });
+
+      // Combine counts and types
+      const flags: Record<string, { type: 'inappropriate' | 'spam' | 'pinned', count: number }> = {};
+      Object.keys(flagCounts).forEach(commentId => {
+        flags[commentId] = {
+          type: flagTypes[commentId],
+          count: flagCounts[commentId]
+        };
+      });
+
+      setUserFlags(flags);
+      console.log('Fetched all flags:', flags);
+    } catch (err) {
+      console.error('Error fetching flags:', err);
+    }
+  };
+
   // Fetch comments and user votes based on user state
   useEffect(() => {
     console.log('User state changed, fetching comments...', user ? `User: ${user.id}` : 'Logged out');
     fetchComments(); // Always fetch comments regardless of login state
+    fetchAllFlags(); // Fetch all flags regardless of login state
 
     if (user) {
-      console.log('User logged in, fetching votes and flags...');
+      console.log('User logged in, fetching votes...');
       fetchUserVotes();
-      fetchUserFlags(); // Fetch flags when user logs in
     } else {
-      console.log('User logged out, clearing votes and flags...');
+      console.log('User logged out, clearing votes...');
       setUserVotes({});
-      setUserFlags({}); // Clear flags when logged out
     }
   }, [user]); // Re-run when user logs in or out
 
@@ -346,28 +388,6 @@ export default function Comments() {
     }
   };
 
-  // Fetch user's flags
-  const fetchUserFlags = async () => {
-    if (!user) return;
-    try {
-      const { data, error } = await supabase
-        .from('flags')
-        .select('comment_id, flag_type')
-        .eq('user_id', user.id);
-
-      if (error) throw error;
-
-      const flags: Record<string, 'inappropriate' | 'spam'> = {};
-      data.forEach((flag: FlagRecord) => {
-        flags[flag.comment_id] = flag.flag_type;
-      });
-      setUserFlags(flags);
-      console.log('Fetched user flags:', flags);
-    } catch (err) {
-      console.error('Error fetching user flags:', err);
-    }
-  };
-
   // Add new comment or reply
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -376,24 +396,53 @@ export default function Comments() {
     setIsSubmitting(true);
     try {
       setError(null);
-      const { data, error } = await supabase
+      console.log('Attempting to post comment with data:', {
+        content: newComment,
+        user_id: user.id,
+        parent_id: replyingTo,
+        likes: 0,
+        dislikes: 0
+      });
+      
+      // First try to insert without select
+      const { error: insertError } = await supabase
         .from('comments')
-        .insert([
-          {
-            content: newComment,
-            user_id: user.id,
-            parent_id: replyingTo,
-            likes: 0,
-            dislikes: 0
-          }
-        ])
-        .select();
+        .insert({
+          content: newComment,
+          user_id: user.id,
+          parent_id: replyingTo,
+          likes: 0,
+          dislikes: 0
+        });
 
-      if (error) throw error;
+      if (insertError) {
+        console.error('Error posting comment:', insertError);
+        console.error('Error details:', {
+          code: insertError.code,
+          message: insertError.message,
+          details: insertError.details,
+          hint: insertError.hint
+        });
+        throw insertError;
+      }
+
+      // If insert succeeds, fetch the new comment
+      const { data, error: fetchError } = await supabase
+        .from('comments')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (fetchError) {
+        console.error('Error fetching new comment:', fetchError);
+        throw fetchError;
+      }
       
       // Create a new comment object with user metadata
       const newCommentWithUser = {
-        ...data[0],
+        ...data,
         user: {
           email: user.email,
           user_metadata: user.user_metadata
@@ -427,22 +476,34 @@ export default function Comments() {
   // Memoized sorted comments
   const sortedComments = useMemo(() => {
     const topLevelComments = comments.filter(comment => !comment.parent_id);
-    switch (sortOrder) {
-      case 'oldest':
-        return [...topLevelComments].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-      case 'likes':
-        return [...topLevelComments].sort((a, b) => b.likes - a.likes);
-      case 'dislikes':
-        return [...topLevelComments].sort((a, b) => b.dislikes - a.dislikes);
-      case 'flagged':
-        return [...topLevelComments].filter(comment => {
-          // Check if any user has flagged this comment
-          return Object.keys(userFlags).includes(comment.id);
-        });
-      case 'latest':
-      default:
-        return [...topLevelComments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    }
+    
+    // Separate pinned and unpinned comments
+    const pinnedComments = topLevelComments.filter(comment => 
+      userFlags[comment.id]?.type === 'pinned'
+    );
+    const unpinnedComments = topLevelComments.filter(comment => 
+      userFlags[comment.id]?.type !== 'pinned'
+    );
+
+    // Sort unpinned comments based on sortOrder
+    const sortedUnpinned = [...unpinnedComments].sort((a, b) => {
+      switch (sortOrder) {
+        case 'oldest':
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        case 'likes':
+          return b.likes - a.likes;
+        case 'dislikes':
+          return b.dislikes - a.dislikes;
+        case 'flagged':
+          return Object.keys(userFlags).includes(b.id) ? 1 : -1;
+        case 'latest':
+        default:
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      }
+    });
+
+    // Return pinned comments first, then sorted unpinned comments
+    return [...pinnedComments, ...sortedUnpinned];
   }, [comments, sortOrder, userFlags]);
 
   // Get replies for a comment
@@ -452,7 +513,7 @@ export default function Comments() {
   };
 
   // Handle flagging/unflagging a comment
-  const handleFlagComment = async (commentId: string, flagType: 'inappropriate' | 'spam') => {
+  const handleFlagComment = async (commentId: string, flagType: 'inappropriate' | 'spam' | 'pinned') => {
     if (!user) {
       setError('Please sign in to flag comments.');
       return;
@@ -485,7 +546,7 @@ export default function Comments() {
           .insert({ user_id: user.id, comment_id: commentId, flag_type: flagType });
         if (error) throw error;
         // Update local state
-        setUserFlags(prev => ({ ...prev, [commentId]: flagType }));
+        setUserFlags(prev => ({ ...prev, [commentId]: { type: flagType, count: 1 } }));
       }
     } catch (err: any) {
       console.error('Error flagging comment:', err);
@@ -498,11 +559,20 @@ export default function Comments() {
     const replies = getReplies(comment.id);
     const hasReplies = replies.length > 0;
     const isExpanded = expandedReplies[comment.id];
-    const isFlaggedByUser = !!userFlags[comment.id];
+    const isFlagged = !!userFlags[comment.id];
+    const flagCount = userFlags[comment.id]?.count || 0;
     const isOwner = user?.id === comment.user_id;
     const isAdmin = user?.user_metadata?.user_type === 'admin';
     const isEditing = editingCommentId === comment.id;
     const isCommenterAdmin = comment.user?.user_metadata?.user_type === 'admin';
+
+    console.log('Comment render debug:', {
+      commentId: comment.id,
+      isAdmin,
+      userType: user?.user_metadata?.user_type,
+      isFlagged,
+      flagCount
+    });
 
     const displayName = comment.user?.user_metadata?.display_name || comment.user?.email || 'Anonymous';
     const avatarUrl = comment.user?.user_metadata?.avatar_url;
@@ -525,66 +595,210 @@ export default function Comments() {
         <div className="flex-grow space-y-4">
           <div className="border border-white/10 rounded-lg p-4 bg-white/5 relative group">
             {/* Top Right Actions (Flag, Edit, Delete) */} 
-            {user && (
-              <div className="absolute top-1 right-1 flex items-center gap-1">
-                {/* Edit Button (if owner or admin) */} 
-                {(isOwner || isAdmin) && !isEditing && (
+            <div className="absolute top-1 right-1 flex items-center gap-1">
+              {isFlagged && (
+                <div className={`flex items-center gap-1 ${userFlags[comment.id]?.type === 'pinned' ? 'text-yellow-400' : 'text-yellow-500'} ${!user ? 'mt-2 mr-2' : ''}`} 
+                  title={userFlags[comment.id]?.type === 'pinned' 
+                    ? 'Pinned Comment' 
+                    : `Flagged as ${userFlags[comment.id]?.type} (${flagCount} ${flagCount === 1 ? 'flag' : 'flags'})`}
+                >
+                  {userFlags[comment.id]?.type === 'pinned' ? (
+                    <Pin className="w-4 h-4" />
+                  ) : (
+                    <Flag className="w-4 h-4" />
+                  )}
+                  {userFlags[comment.id]?.type !== 'pinned' && (
+                    <span>{flagCount}</span>
+                  )}
+                </div>
+              )}
+              {user && (
+                <div className="relative flag-dropdown-container">
                   <button
-                    onClick={() => handleEditClick(comment)}
+                    onClick={() => setOpenFlagMenu(openFlagMenu === comment.id ? null : comment.id)}
                     className="p-1.5 rounded-full text-white/50 hover:text-white hover:bg-white/10 transition-colors"
-                    title="Edit comment"
+                    title="More actions"
                   >
-                    <Edit className="w-4 h-4" />
+                    <MoreVertical className="w-4 h-4" />
                   </button>
-                )}
-                {/* Delete Button (if owner or admin) */} 
-                {(isOwner || isAdmin) && !isEditing && (
-                  <button
-                    onClick={() => handleDeleteClick(comment.id)}
-                    className="p-1.5 rounded-full text-red-500/60 hover:text-red-500 hover:bg-white/10 transition-colors"
-                    title="Delete comment"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
-                {/* Flag Button and Dropdown (only if not editing) */} 
-                {!isEditing && !isOwner && ( // Show flag for all users on others' comments
-                  <div className="relative flag-dropdown-container">
-                    <button
-                      onClick={() => setOpenFlagMenu(openFlagMenu === comment.id ? null : comment.id)}
-                      className={`p-1.5 rounded-full text-white/50 hover:text-white hover:bg-white/10 transition-colors ${userFlags[comment.id] ? 'text-yellow-500' : ''}`}
-                      title={userFlags[comment.id] ? `You flagged this as ${userFlags[comment.id]}` : 'Flag comment'}
-                    >
-                      <Flag className="w-4 h-4" />
-                    </button>
-                    {openFlagMenu === comment.id && (
-                      <div className="absolute top-full right-0 mt-1 w-44 bg-[#2c2c2c] border border-white/20 rounded-lg shadow-lg z-20 py-1">
-                        <button onClick={() => handleFlagComment(comment.id, 'inappropriate')} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2">
-                          Inappropriate
+                  {openFlagMenu === comment.id && (
+                    <div className="absolute top-full right-0 mt-1 w-44 bg-[#2c2c2c] border border-white/20 rounded-lg shadow-lg z-50 py-1 overflow-visible">
+                      {/* Edit Button (if owner or admin) */}
+                      {(isOwner || isAdmin) && !isEditing && (
+                        <button
+                          onClick={() => {
+                            handleEditClick(comment);
+                            setOpenFlagMenu(null);
+                          }}
+                          className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"
+                        >
+                          <Edit className="w-4 h-4" />
+                          Edit
                         </button>
-                        <button onClick={() => handleFlagComment(comment.id, 'spam')} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2">
-                          Spam
+                      )}
+                      {/* Delete Button (if owner or admin) */}
+                      {(isOwner || isAdmin) && !isEditing && (
+                        <button
+                          onClick={() => {
+                            handleDeleteClick(comment.id);
+                            setOpenFlagMenu(null);
+                          }}
+                          className="w-full text-left px-3 py-1.5 text-sm text-red-400 hover:bg-white/10 flex items-center gap-2"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          Delete
                         </button>
-                        {isFlaggedByUser && (
-                          <>
-                            <div className="h-px bg-white/10 mx-2 my-1"></div>
-                            <button onClick={() => handleFlagComment(comment.id, 'inappropriate')} className="w-full text-left px-3 py-1.5 text-sm text-red-400 hover:bg-white/10 flex items-center gap-2">
-                              Unflag
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
+                      )}
+                      {/* Divider after delete */}
+                      {(isOwner || isAdmin) && !isEditing && (
+                        <div className="h-px bg-white/10 mx-2 my-1"></div>
+                      )}
+                      {/* Admin-only: Pin/Unpin Comment */}
+                      {isAdmin && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              const isPinned = userFlags[comment.id]?.type === 'pinned';
+                              
+                              if (isPinned) {
+                                // Unpin the comment
+                                const { error } = await supabase
+                                  .from('flags')
+                                  .delete()
+                                  .eq('comment_id', comment.id)
+                                  .eq('flag_type', 'pinned');
+                                
+                                if (error) throw error;
+                                
+                                // Update local state
+                                setUserFlags(prev => {
+                                  const newFlags = { ...prev };
+                                  delete newFlags[comment.id];
+                                  return newFlags;
+                                });
+                              } else {
+                                // Pin the comment
+                                const { error } = await supabase
+                                  .from('flags')
+                                  .insert({
+                                    comment_id: comment.id,
+                                    user_id: user.id,
+                                    flag_type: 'pinned'
+                                  });
+                                
+                                if (error) throw error;
+                                
+                                // Update local state
+                                setUserFlags(prev => ({
+                                  ...prev,
+                                  [comment.id]: { type: 'pinned', count: 1 }
+                                }));
+                              }
+                              
+                              setOpenFlagMenu(null);
+                            } catch (err) {
+                              console.error('Error toggling pin:', err);
+                              setError('Failed to toggle pin. Please try again.');
+                            }
+                          }}
+                          className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"
+                        >
+                          <Pin className="w-4 h-4" />
+                          {userFlags[comment.id]?.type === 'pinned' ? 'Unpin Comment' : 'Pin Comment'}
+                        </button>
+                      )}
+                      {/* Add divider before flag options */}
+                      {(!isOwner || isAdmin) && (
+                        <div className="h-px bg-white/10 mx-2 my-1"></div>
+                      )}
+                      {/* Flag Options (show for non-owners or admins) */}
+                      {(!isOwner || isAdmin) && (
+                        <>
+                          <button
+                            onClick={() => {
+                              handleFlagComment(comment.id, 'inappropriate');
+                              setOpenFlagMenu(null);
+                            }}
+                            className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"
+                          >
+                            <Flag className="w-4 h-4" />
+                            Flag as Inappropriate
+                          </button>
+                          <button
+                            onClick={() => {
+                              handleFlagComment(comment.id, 'spam');
+                              setOpenFlagMenu(null);
+                            }}
+                            className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"
+                          >
+                            <Flag className="w-4 h-4" />
+                            Flag as Spam
+                          </button>
+                          {isFlagged && userFlags[comment.id]?.type !== 'pinned' && (
+                            <>
+                              <div className="h-px bg-white/10 mx-2 my-1"></div>
+                              {(!isOwner || isAdmin) && (
+                                <button
+                                  onClick={() => {
+                                    handleFlagComment(comment.id, 'inappropriate');
+                                    setOpenFlagMenu(null);
+                                  }}
+                                  className="w-full text-left px-3 py-1.5 text-sm text-red-400 hover:bg-white/10 flex items-center gap-2"
+                                >
+                                  <Flag className="w-4 h-4" />
+                                  Unflag
+                                </button>
+                              )}
+                              {/* Admin-only: Remove All Flags */}
+                              {isAdmin && (
+                                <button
+                                  onClick={async () => {
+                                    try {
+                                      console.log('Attempting to remove all flags for comment:', comment.id);
+                                      const { error } = await supabase
+                                        .from('flags')
+                                        .delete()
+                                        .eq('comment_id', comment.id);
+                                      
+                                      if (error) {
+                                        console.error('Error removing flags:', error);
+                                        throw error;
+                                      }
+                                      
+                                      // Update local state
+                                      setUserFlags(prev => {
+                                        const newFlags = { ...prev };
+                                        delete newFlags[comment.id];
+                                        return newFlags;
+                                      });
+                                      
+                                      setOpenFlagMenu(null);
+                                    } catch (err) {
+                                      console.error('Error removing all flags:', err);
+                                      setError('Failed to remove all flags. Please try again.');
+                                    }
+                                  }}
+                                  className="w-full text-left px-3 py-1.5 text-sm text-red-400 hover:bg-white/10 flex items-center gap-2"
+                                >
+                                  <Flag className="w-4 h-4" />
+                                  Remove All Flags
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
-            <div className="flex justify-between items-start mb-2">
+          <div className="flex justify-between items-start mb-2">
               <div className="flex items-center gap-2">
-                <span className="font-medium text-white/90">
+              <span className="font-medium text-white/90">
                   {displayName}
-                </span>
+              </span>
                 {isCommenterAdmin ? (
                   <div className="relative inline-block">
                     <div className="bg-yellow-400/20 rounded-full p-0.5">
@@ -625,13 +839,13 @@ export default function Comments() {
                   </div>
                 )}
                 <span className="text-white/60 text-sm">
-                  {new Date(comment.created_at).toLocaleDateString()}
+                {new Date(comment.created_at).toLocaleDateString()}
                   {comment.updated_at && new Date(comment.updated_at).getTime() > new Date(comment.created_at).getTime() + 1000 && (
                     <span className="text-xs italic text-white/50 ml-1">(edited)</span>
                   )}
-                </span>
-              </div>
+              </span>
             </div>
+          </div>
 
             {/* Content or Edit Form */}
             {isEditing ? (
@@ -645,14 +859,14 @@ export default function Comments() {
                 <div className="flex justify-end gap-2">
                   <button
                     onClick={handleCancelEdit}
-                    className="text-xs text-white/60 hover:text-white px-2 py-1 rounded transition-colors"
+                    className="text-white/60 hover:text-white px-4 py-2 rounded-lg transition-colors"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleUpdateComment}
                     disabled={isUpdatingComment || !editingContent.trim()}
-                    className="text-xs bg-primary/80 hover:bg-primary text-white px-3 py-1 rounded disabled:opacity-50 transition-colors"
+                    className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
                   >
                     {isUpdatingComment ? 'Saving...' : 'Save'}
                   </button>
@@ -665,85 +879,85 @@ export default function Comments() {
             {/* Bottom Actions (Vote, Reply, Toggle) */} 
             {!isEditing && (
               <div className="flex items-center space-x-4 mt-2"> {/* Added mt-2 for spacing */}
-                <button
-                  onClick={() => handleVote(comment.id, 'like')}
+            <button
+              onClick={() => handleVote(comment.id, 'like')}
                   className={`flex items-center gap-1 text-green-500 hover:text-green-400 transition-colors ${
-                    userVotes[comment.id] === 'like' ? 'text-green-400' : ''
-                  }`}
-                >
+                userVotes[comment.id] === 'like' ? 'text-green-400' : ''
+              }`}
+            >
                   <ThumbsUp className="w-4 h-4" /> {comment.likes}
-                </button>
-                <button
-                  onClick={() => handleVote(comment.id, 'dislike')}
+            </button>
+            <button
+              onClick={() => handleVote(comment.id, 'dislike')}
                   className={`flex items-center gap-1 text-red-500 hover:text-red-400 transition-colors ${
-                    userVotes[comment.id] === 'dislike' ? 'text-red-400' : ''
-                  }`}
-                >
+                userVotes[comment.id] === 'dislike' ? 'text-red-400' : ''
+              }`}
+            >
                   <ThumbsDown className="w-4 h-4" /> {comment.dislikes}
-                </button>
-                {user && (
-                  <button
-                    onClick={() => handleReplyClick(comment.id)}
+            </button>
+            {user && (
+              <button
+                onClick={() => handleReplyClick(comment.id)}
                     className="text-white/60 hover:text-white transition-colors flex items-center gap-1 text-sm"
                     title="Reply"
-                  >
-                    <Reply className="w-4 h-4" />
-                    Reply
-                  </button>
-                )}
-                {hasReplies && (
-                  <button
-                    onClick={() => toggleReplies(comment.id)}
+              >
+                <Reply className="w-4 h-4" />
+                Reply
+              </button>
+            )}
+            {hasReplies && (
+              <button
+                onClick={() => toggleReplies(comment.id)}
                     className="text-white/60 hover:text-white transition-colors flex items-center gap-1 text-sm"
-                  >
-                    {isExpanded ? (
-                      <ChevronUp className="w-4 h-4" />
-                    ) : (
-                      <ChevronDown className="w-4 h-4" />
-                    )}
-                    {replies.length} {replies.length === 1 ? 'Reply' : 'Replies'}
-                  </button>
+              >
+                {isExpanded ? (
+                  <ChevronUp className="w-4 h-4" />
+                ) : (
+                  <ChevronDown className="w-4 h-4" />
                 )}
-              </div>
+                {replies.length} {replies.length === 1 ? 'Reply' : 'Replies'}
+              </button>
+            )}
+          </div>
             )}
             
             {/* Reply Form */} 
             {replyingTo === comment.id && !isEditing && (
-              <form onSubmit={handleSubmit} className="mt-4">
-                <div className="mb-4">
-                  <textarea
-                    value={newComment}
-                    onChange={(e) => setNewComment(e.target.value)}
-                    placeholder="Write a reply..."
-                    className="w-full p-3 border border-white/10 rounded-lg bg-white/5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    rows={3}
-                    required
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                  >
-                    {isSubmitting ? 'Posting...' : 'Post Reply'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setReplyingTo(null)}
-                    className="text-white/60 hover:text-white px-4 py-2 rounded-lg transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-          {hasReplies && isExpanded && (
-            <div className="space-y-4">
-              {replies.map(reply => renderComment(reply, level + 1))}
-            </div>
+            <form onSubmit={handleSubmit} className="mt-4">
+              <div className="mb-4">
+                <textarea
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  placeholder="Write a reply..."
+                  className="w-full p-3 border border-white/10 rounded-lg bg-white/5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  rows={3}
+                  required
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                >
+                  {isSubmitting ? 'Posting...' : 'Post Reply'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReplyingTo(null)}
+                  className="text-white/60 hover:text-white px-4 py-2 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
           )}
+        </div>
+        {hasReplies && isExpanded && (
+          <div className="space-y-4">
+            {replies.map(reply => renderComment(reply, level + 1))}
+          </div>
+        )}
         </div>
       </div>
     );
@@ -1101,95 +1315,123 @@ export default function Comments() {
     };
   }, [openFlagMenu]);
 
+  // Add click outside handler for user menu
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (showUserMenu && !target.closest('.user-menu-container')) {
+        setShowUserMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showUserMenu]);
+
   return (
     <div className="max-w-5xl mx-auto px-2 sm:px-6">
-      <div className="bg-white/5 backdrop-blur-xl rounded-lg overflow-hidden shadow-lg mx-2 sm:mx-8 md:mx-0 glass-morphism">
-        <div className="p-6">
+      <div className="bg-white/5 backdrop-blur-xl rounded-lg overflow-visible shadow-lg mx-2 sm:mx-8 md:mx-0 glass-morphism">
+        <div className={`p-6 ${isCommentsCollapsed ? 'pb-0' : ''}`}>
           {/* Header Section */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4 mb-6">
             {/* Title, Collapse Toggle, and Sort Dropdown */}
-            <div className="flex items-center gap-2">
-              <button 
-                onClick={() => setIsCommentsCollapsed(!isCommentsCollapsed)}
-                className="p-1 text-white/60 hover:text-white hover:bg-white/10 rounded-full transition-colors"
-                title={isCommentsCollapsed ? 'Expand comments' : 'Collapse comments'}
-              >
-                {isCommentsCollapsed ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}
-              </button>
-              <h2 className="text-2xl font-bold">Comments</h2>
-              {/* Conditionally render Sort button/dropdown */}
-              {!isCommentsCollapsed && (
-                <div className="relative ml-2 sort-dropdown-container"> {/* Added sort-dropdown-container class */}
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => setIsCommentsCollapsed(!isCommentsCollapsed)}
+                  className="p-1 text-white/60 hover:text-white hover:bg-white/10 rounded-full transition-colors"
+                  title={isCommentsCollapsed ? 'Expand comments' : 'Collapse comments'}
+                >
+                  {isCommentsCollapsed ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}
+                </button>
+                <h2 className="text-2xl font-bold">Comments</h2>
+                {/* Conditionally render Sort button/dropdown */}
+                {!isCommentsCollapsed && (
+                  <div className="relative ml-2 sort-dropdown-container">
+                    <button
+                      onClick={() => setShowSortDropdown(!showSortDropdown)}
+                      className="flex items-center gap-1 text-sm text-white/60 hover:text-white transition-colors border border-white/10 px-3 py-1 rounded-lg"
+                    >
+                      <Filter className="w-4 h-4" />
+                      <ChevronDown className={`w-4 h-4 transition-transform ${showSortDropdown ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showSortDropdown && (
+                      <div className="absolute top-full left-0 mt-1 w-44 bg-[#2c2c2c] border border-white/20 rounded-lg shadow-lg z-10 py-1">
+                        <button onClick={() => { setSortOrder('latest'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><SortDesc className='w-4 h-4'/> Latest</button>
+                        <button onClick={() => { setSortOrder('oldest'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><SortAsc className='w-4 h-4'/> Oldest</button>
+                        <button onClick={() => { setSortOrder('likes'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><ThumbsUp className='w-4 h-4'/> Most Upvoted</button>
+                        <button onClick={() => { setSortOrder('dislikes'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><ThumbsDown className='w-4 h-4'/> Most Downvoted</button>
+                        <button onClick={() => { setSortOrder('flagged'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><Flag className='w-4 h-4'/> Flagged</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              {/* Three Dot Menu - All Screen Sizes */}
+              {user && (
+                <div className="relative user-menu-container">
                   <button
-                    onClick={() => setShowSortDropdown(!showSortDropdown)}
-                    className="flex items-center gap-1 text-sm text-white/60 hover:text-white transition-colors border border-white/10 px-3 py-1 rounded-lg"
+                    onClick={() => setShowUserMenu(!showUserMenu)}
+                    className="pl-3 pr-1.5 py-1.5 rounded-full text-white/60 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-1 border border-white/10"
                   >
-                    Sort By: {sortOrder.charAt(0).toUpperCase() + sortOrder.slice(1)}
-                    <ChevronDown className={`w-4 h-4 transition-transform ${showSortDropdown ? 'rotate-180' : ''}`} />
+                    {user.user_metadata?.avatar_url ? (
+                      <img 
+                        src={user.user_metadata.avatar_url} 
+                        alt={`${user.user_metadata?.display_name || user.email}'s avatar`} 
+                        className="w-8 h-8 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white/60 text-sm">
+                        {(user.user_metadata?.display_name || user.email).charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <MoreVertical className="w-4 h-4" />
                   </button>
-                  {showSortDropdown && (
-                    <div className="absolute top-full left-0 mt-1 w-44 bg-[#2c2c2c] border border-white/20 rounded-lg shadow-lg z-10 py-1">
-                      <button onClick={() => { setSortOrder('latest'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><SortDesc className='w-4 h-4'/> Latest</button>
-                      <button onClick={() => { setSortOrder('oldest'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><SortAsc className='w-4 h-4'/> Oldest</button>
-                      <button onClick={() => { setSortOrder('likes'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><ThumbsUp className='w-4 h-4'/> Most Upvoted</button>
-                      <button onClick={() => { setSortOrder('dislikes'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><ThumbsDown className='w-4 h-4'/> Most Downvoted</button>
-                      <button onClick={() => { setSortOrder('flagged'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><Flag className='w-4 h-4'/> Flagged</button>
+                  {showUserMenu && (
+                    <div className="absolute top-full right-0 mt-1 w-48 bg-[#2c2c2c] border border-white/20 rounded-lg shadow-lg z-20 py-1">
+                      <div className="px-3 py-3 text-sm text-white/60 border-b border-white/10 flex flex-col items-center gap-2">
+                        <div className="w-12 h-12 rounded-full overflow-hidden bg-white/10">
+                          {user.user_metadata?.avatar_url ? (
+                            <img 
+                              src={user.user_metadata.avatar_url} 
+                              alt={`${user.user_metadata?.display_name || user.email}'s avatar`} 
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-white/60 text-lg">
+                              {(user.user_metadata?.display_name || user.email).charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                        </div>
+                        <span className="text-center font-medium">{user.user_metadata?.display_name || user.email}</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          openSettingsModal();
+                          setShowUserMenu(false);
+                        }}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-white/10 flex items-center gap-2"
+                      >
+                        <Settings className="w-4 h-4" />
+                        Settings
+                      </button>
+                      <button
+                        onClick={() => {
+                          handleSignOut();
+                          setShowUserMenu(false);
+                        }}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-white/10 flex items-center gap-2"
+                      >
+                        <LogOut className="w-4 h-4" />
+                        Sign Out
+                      </button>
                     </div>
                   )}
                 </div>
               )}
             </div>
-            {/* User Actions */}
-            {isLoading ? (
-              <div className="text-sm text-white/60 animate-pulse">Loading user...</div>
-            ) : user ? (
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                <span className="text-sm text-white/60 whitespace-nowrap">
-                  Signed in as {user.user_metadata?.display_name || user.email}
-                </span>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={openSettingsModal}
-                    className="text-sm text-white/60 hover:text-white transition-colors flex items-center gap-1 bg-white/10 hover:bg-white/20 px-2 py-1 rounded-md"
-                  >
-                    <Settings className="w-4 h-4" />
-                    <span>Settings</span>
-                  </button>
-                  <button
-                    onClick={handleSignOut}
-                    className="text-sm text-white/60 hover:text-white transition-colors flex items-center gap-1 bg-white/10 hover:bg-white/20 px-2 py-1 rounded-md"
-                  >
-                    <LogOut className="w-4 h-4" />
-                    <span>Sign Out</span>
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => { 
-                    if (isCommentsCollapsed) setIsCommentsCollapsed(false); // Expand if collapsed
-                    setShowSignUp(false); 
-                    setShowAuthForm(true); 
-                  }}
-                  className="text-sm text-white/60 hover:text-white transition-colors flex items-center gap-1 bg-white/10 hover:bg-white/20 px-2 py-1 rounded-md"
-                >
-                  <LogIn className="w-4 h-4" />
-                  Sign In
-                </button>
-                <button
-                  onClick={() => { 
-                    if (isCommentsCollapsed) setIsCommentsCollapsed(false); // Expand if collapsed
-                    setShowSignUp(true); 
-                    setShowAuthForm(true); 
-                  }}
-                  className="text-sm text-white/60 hover:text-white transition-colors flex items-center gap-1 bg-white/10 hover:bg-white/20 px-2 py-1 rounded-md"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  Sign Up
-                </button>
-              </div>
-            )}
           </div>
           
           {/* Collapsible Content Area */} 
@@ -1197,92 +1439,158 @@ export default function Comments() {
             <>
               {/* Auth Forms */}
               {!user && showAuthForm && (
-                <form onSubmit={showSignUp ? handleSignUp : handleSignIn} className="mb-8">
-                  <div className="space-y-4">
-                    {showSignUp && (
+                <div className="mb-8 border border-white/10 rounded-lg bg-white/5 p-6 relative">
+                  <button
+                    onClick={() => setShowAuthForm(false)}
+                    className="absolute top-4 right-4 text-white/60 hover:text-white transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                  <h3 className="text-xl font-bold mb-6">{showSignUp ? 'Sign Up' : 'Sign In'}</h3>
+                  <form onSubmit={showSignUp ? handleSignUp : handleSignIn}>
+                    <div className="space-y-4">
+                      {showSignUp && (
+                        <div>
+                          <input
+                            type="text"
+                            value={displayName}
+                            onChange={(e) => setDisplayName(e.target.value)}
+                            placeholder="Display Name"
+                            className="w-full p-3 border border-white/10 rounded-lg bg-white/5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50"
+                            required={showSignUp}
+                          />
+                        </div>
+                      )}
                       <div>
+                        <label htmlFor="email-input" className="sr-only">Email</label>
                         <input
-                          type="text"
-                          value={displayName}
-                          onChange={(e) => setDisplayName(e.target.value)}
-                          placeholder="Display Name"
+                          id="email-input"
+                          type="email"
+                          value={email}
+                          onChange={(e) => {
+                            setEmail(e.target.value);
+                            setResetMessage(null);
+                            setError(null);
+                          }}
+                          placeholder="Email"
                           className="w-full p-3 border border-white/10 rounded-lg bg-white/5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50"
-                          required={showSignUp}
+                          required
+                          autoComplete="email"
                         />
                       </div>
-                    )}
-                    <div>
-                      <label htmlFor="email-input" className="sr-only">Email</label>
-                      <input
-                        id="email-input"
-                        type="email"
-                        value={email}
-                        onChange={(e) => {
-                          setEmail(e.target.value);
-                          setResetMessage(null); // Clear reset message when email changes
-                          setError(null); // Clear general error when email changes
-                        }}
-                        placeholder="Email"
-                        className="w-full p-3 border border-white/10 rounded-lg bg-white/5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50"
-                        required
-                        autoComplete="email"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="password-input" className="sr-only">Password</label>
-                      <input
-                        id="password-input"
-                        type="password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder="Password"
-                        className="w-full p-3 border border-white/10 rounded-lg bg-white/5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50"
-                        required={!isResettingPassword && !showSignUp} // Password not required if just resetting on sign-in form
-                        autoComplete={showSignUp ? "new-password" : "current-password"}
-                      />
-                    </div>
+                      <div>
+                        <label htmlFor="password-input" className="sr-only">Password</label>
+                        <input
+                          id="password-input"
+                          type="password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          placeholder="Password"
+                          className="w-full p-3 border border-white/10 rounded-lg bg-white/5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50"
+                          required={!isResettingPassword && !showSignUp}
+                          autoComplete={showSignUp ? "new-password" : "current-password"}
+                        />
+                      </div>
 
-                    {/* Forgot Password Link (only shows on Sign In form) */}
-                    {!showSignUp && (
-                      <div className="text-right -mt-2 mb-2"> {/* Adjusted margin */}
-                        <button
-                          type="button"
-                          onClick={handlePasswordReset}
-                          disabled={isResettingPassword}
-                          className="text-sm text-primary/80 hover:text-primary disabled:opacity-50 transition-colors"
-                        >
-                          {isResettingPassword ? 'Sending...' : 'Forgot Password?'}
-                        </button>
+                      {/* Forgot Password Link */}
+                      {!showSignUp && (
+                        <div className="text-right">
+                          <button
+                            type="button"
+                            onClick={handlePasswordReset}
+                            disabled={isResettingPassword}
+                            className="text-sm text-white hover:text-white/80 disabled:opacity-50 transition-colors underline"
+                          >
+                            {isResettingPassword ? 'Sending...' : 'Forgot Password?'}
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Display Reset Message */}
+                      {resetMessage && (
+                        <div className={`text-sm p-3 rounded-lg ${resetMessage.includes('sent') ? 'bg-green-500/10 text-green-300 border border-green-500/20' : 'bg-red-500/10 text-red-300 border border-red-500/20'}`}>
+                          {resetMessage}
+                        </div>
+                      )}
+
+                      <button
+                        type="submit"
+                        disabled={isSigningIn || isSigningUp || (isResettingPassword && !showSignUp)}
+                        className="w-full bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+                      >
+                        {isSigningIn ? 'Signing in...' : isSigningUp ? 'Signing up...' : showSignUp ? 'Sign Up' : 'Sign In'}
+                      </button>
+
+                      {/* Switch Form Link */}
+                      <div className="text-center text-sm text-white/60">
+                        {showSignUp ? (
+                          <span>
+                            Already have an account?{' '}
+                            <button
+                              type="button"
+                              onClick={() => setShowSignUp(false)}
+                              className="text-white hover:text-white/80 transition-colors underline"
+                            >
+                              Sign In
+                            </button>
+                          </span>
+                        ) : (
+                          <span>
+                            Don't have an account?{' '}
+                            <button
+                              type="button"
+                              onClick={() => setShowSignUp(true)}
+                              className="text-white hover:text-white/80 transition-colors underline"
+                            >
+                              Sign Up
+                            </button>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {/* Display general errors */}
+                    {error && !resetMessage && (
+                      <div className="mt-4 text-sm p-3 rounded-lg bg-red-500/10 text-red-300 border border-red-500/20">
+                        {error}
                       </div>
                     )}
-
-                    {/* Display Reset Message */}
-                    {resetMessage && (
-                      <div className={`text-sm p-3 rounded-lg ${resetMessage.includes('sent') ? 'bg-green-500/10 text-green-300 border border-green-500/20' : 'bg-red-500/10 text-red-300 border border-red-500/20'}`}>
-                        {resetMessage}
-                      </div>
-                    )}
-
+                  </form>
+                </div>
+              )}
+          
+              {/* Sign In Prompt */}
+              {!user && !showAuthForm && (
+                <div className="mb-8 p-4 border border-white/10 rounded-lg bg-white/5 flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <span className="text-white/60">Sign in or sign up to post comments</span>
+                  <div className="flex items-center gap-3">
                     <button
-                      type="submit"
-                      // Conditionally disable if resetting password to avoid accidental submission
-                      disabled={isSigningIn || isSigningUp || (isResettingPassword && !showSignUp)}
-                      className="w-full bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+                      onClick={() => { 
+                        if (isCommentsCollapsed) setIsCommentsCollapsed(false);
+                        setShowSignUp(false); 
+                        setShowAuthForm(true); 
+                      }}
+                      className="text-sm text-white/60 hover:text-white transition-colors flex items-center gap-1 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-md whitespace-nowrap"
                     >
-                      {isSigningIn ? 'Signing in...' : isSigningUp ? 'Signing up...' : showSignUp ? 'Sign Up' : 'Sign In'}
+                      <LogIn className="w-4 h-4" />
+                      Sign In
+                    </button>
+                    <button
+                      onClick={() => { 
+                        if (isCommentsCollapsed) setIsCommentsCollapsed(false);
+                        setShowSignUp(true); 
+                        setShowAuthForm(true); 
+                      }}
+                      className="text-sm text-white/60 hover:text-white transition-colors flex items-center gap-1 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-md whitespace-nowrap"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      Sign Up
                     </button>
                   </div>
-                  {/* Display general errors */}
-                  {error && !resetMessage && ( // Don't show general error if reset message is showing
-                    <div className="mt-4 text-sm p-3 rounded-lg bg-red-500/10 text-red-300 border border-red-500/20">
-                      {error}
-                    </div>
-                  )}
-                </form>
+                </div>
               )}
-              
+
               {/* Comment Form */}
-              {user && !replyingTo && !editingCommentId && ( // Ensure editing doesn't show main form
+              {user && !replyingTo && !editingCommentId && (
                 <form onSubmit={handleSubmit} className="mb-8">
                   <div className="mb-4">
                     <textarea
@@ -1307,7 +1615,32 @@ export default function Comments() {
               {/* Comments List & Show More */}
               <div className="space-y-4">
                 {sortedComments.length > 0 ? (
-                  sortedComments.slice(0, visibleCommentCount).map(comment => renderComment(comment))
+                  <>
+                    {/* Pinned Comments Section */}
+                    {sortedComments.some(comment => userFlags[comment.id]?.type === 'pinned') && (
+                      <div className="mb-6">
+                        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                          <Pin className="w-5 h-5 text-yellow-400" />
+                          Pinned Comments
+                        </h3>
+                        <div className="space-y-4">
+                          {sortedComments
+                            .filter(comment => userFlags[comment.id]?.type === 'pinned')
+                            .map(comment => renderComment(comment))}
+                        </div>
+                        {sortedComments.some(comment => userFlags[comment.id]?.type !== 'pinned') && (
+                          <div className="h-px bg-white/10 my-6"></div>
+                        )}
+                      </div>
+                    )}
+                    {/* Regular Comments Section */}
+                    <div className="space-y-4">
+                      {sortedComments
+                        .filter(comment => userFlags[comment.id]?.type !== 'pinned')
+                        .slice(0, visibleCommentCount)
+                        .map(comment => renderComment(comment))}
+                    </div>
+                  </>
                 ) : (
                   <div className="text-center py-8 text-white/60">
                     <p className="text-sm">No comments found</p>
@@ -1422,13 +1755,9 @@ export default function Comments() {
                 <button
                   type="submit"
                   disabled={isUpdatingProfile}
-                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
                 >
-                  {isUpdatingProfile ? (
-                     <>Saving...</> // Add spinner maybe?
-                  ) : (
-                    <><Save className="w-4 h-4"/>Save Changes</>
-                  )}
+                  {isUpdatingProfile ? 'Saving...' : 'Save'}
                 </button>
               </div>
             </form>
