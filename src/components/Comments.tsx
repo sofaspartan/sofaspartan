@@ -1272,37 +1272,36 @@ export default function Comments() {
   // Handle confirming comment delete
   const handleConfirmDelete = async () => {
     if (!showDeleteConfirmModal) return;
-    if (user?.user_metadata?.user_type !== 'admin') {
-      setError('You do not have permission to delete this comment.');
-      return;
-    }
     setIsDeletingComment(true);
     setError(null);
     try {
       const commentIdToDelete = showDeleteConfirmModal;
-      const { error } = await supabase
+
+      // Call the database function to handle the deletion
+      const { error: deleteError } = await supabase
+        .rpc('delete_comment', { comment_id: commentIdToDelete });
+
+      if (deleteError) {
+        console.error('Error deleting comment:', deleteError);
+        throw new Error('Failed to delete comment. Please try again.');
+      }
+
+      // Get all replies to this comment for local state update
+      const { data: replies, error: repliesError } = await supabase
         .from('comments')
-        .delete()
-        .eq('id', commentIdToDelete);
+        .select('id')
+        .eq('parent_id', commentIdToDelete);
 
-      if (error) throw error;
+      if (repliesError) {
+        console.error('Error fetching replies:', repliesError);
+        throw new Error('Failed to fetch replies. Please try again.');
+      }
 
-      // Remove comment and its replies from local state
+      const replyIds = replies?.map(r => r.id) || [];
+
+      // Update local state
       setComments(prevComments => {
-        const commentIdsToDelete = new Set<string>([commentIdToDelete]);
-        let changed = true;
-        // Recursively find all child IDs (could be optimized for very deep nesting)
-        while (changed) {
-          changed = false;
-          const currentSize = commentIdsToDelete.size;
-          prevComments.forEach(c => {
-            if (c.parent_id && commentIdsToDelete.has(c.parent_id) && !commentIdsToDelete.has(c.id)) {
-              commentIdsToDelete.add(c.id);
-              changed = true;
-            }
-          });
-          if (commentIdsToDelete.size === currentSize) changed = false;
-        }
+        const commentIdsToDelete = new Set<string>([commentIdToDelete, ...replyIds]);
         return prevComments.filter(c => !commentIdsToDelete.has(c.id));
       });
 
