@@ -1,0 +1,5 @@
+schemaname,tablename,policyname,permissive,roles,cmd,qual,with_check
+public,votes,Users can delete their own votes,PERMISSIVE,{public},DELETE,(auth.uid() = user_id),null
+public,votes,Users can insert their own votes,PERMISSIVE,{public},INSERT,null,(auth.uid() = user_id)
+public,votes,Users can update their own votes,PERMISSIVE,{public},UPDATE,(auth.uid() = user_id),null
+public,votes,Users can view all votes,PERMISSIVE,{public},SELECT,true,null

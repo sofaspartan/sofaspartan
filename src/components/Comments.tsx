@@ -1067,21 +1067,42 @@ export default function Comments() {
       const currentVote = userVotes[commentId];
       console.log('Current vote state:', { currentVote, userVotes });
 
+      // Update local state immediately
+      const newComments = [...comments];
+      const commentIndex = newComments.findIndex(c => c.id === commentId);
+      if (commentIndex !== -1) {
+        const comment = newComments[commentIndex];
+        if (currentVote === type) {
+          // Removing vote
+          if (type === 'like') comment.likes = Math.max(0, comment.likes - 1);
+          if (type === 'dislike') comment.dislikes = Math.max(0, comment.dislikes - 1);
+        } else if (currentVote) {
+          // Changing vote
+          if (currentVote === 'like') comment.likes = Math.max(0, comment.likes - 1);
+          if (currentVote === 'dislike') comment.dislikes = Math.max(0, comment.dislikes - 1);
+          if (type === 'like') comment.likes = (comment.likes || 0) + 1;
+          if (type === 'dislike') comment.dislikes = (comment.dislikes || 0) + 1;
+        } else {
+          // New vote
+          if (type === 'like') comment.likes = (comment.likes || 0) + 1;
+          if (type === 'dislike') comment.dislikes = (comment.dislikes || 0) + 1;
+        }
+        setComments(newComments);
+      }
+
       if (currentVote === type) {
         // If clicking the same vote type, remove the vote
         console.log('Removing vote');
-        const { data: deleteData, error: deleteError } = await supabase
+        const { error: deleteError } = await supabase
           .from('votes')
           .delete()
           .eq('user_id', user.id)
-          .eq('comment_id', commentId)
-          .select();
+          .eq('comment_id', commentId);
 
         if (deleteError) {
           console.error('Error deleting vote:', deleteError);
           throw deleteError;
         }
-        console.log('Delete vote response:', deleteData);
 
         // Update local state
         const newVotes = { ...userVotes };
@@ -1090,25 +1111,23 @@ export default function Comments() {
       } else if (currentVote) {
         // If changing vote type, update the vote
         console.log('Updating vote from', currentVote, 'to', type);
-        const { data: updateData, error: updateError } = await supabase
+        const { error: updateError } = await supabase
           .from('votes')
           .update({ vote_type: type })
           .eq('user_id', user.id)
-          .eq('comment_id', commentId)
-          .select();
+          .eq('comment_id', commentId);
 
         if (updateError) {
           console.error('Error updating vote:', updateError);
           throw updateError;
         }
-        console.log('Update vote response:', updateData);
 
         // Update local state
         setUserVotes({ ...userVotes, [commentId]: type });
       } else {
         // If no previous vote, create new vote
         console.log('Creating new vote');
-        const { data: insertData, error: insertError } = await supabase
+        const { error: insertError } = await supabase
           .from('votes')
           .insert([
             {
@@ -1116,21 +1135,43 @@ export default function Comments() {
               comment_id: commentId,
               vote_type: type
             }
-          ])
-          .select();
+          ]);
 
         if (insertError) {
           console.error('Error inserting vote:', insertError);
           throw insertError;
         }
-        console.log('Insert vote response:', insertData);
 
         // Update local state
         setUserVotes({ ...userVotes, [commentId]: type });
       }
 
-      // Refresh comments to get updated counts
-      fetchComments();
+      // Fetch updated vote counts for this comment only
+      const { data: votesData, error: votesError } = await supabase
+        .from('votes')
+        .select('*')
+        .eq('comment_id', commentId);
+
+      if (votesError) {
+        console.error('Error fetching updated votes:', votesError);
+        return;
+      }
+
+      // Calculate new vote counts
+      const voteCounts = { likes: 0, dislikes: 0 };
+      votesData.forEach((vote: Vote) => {
+        if (vote.vote_type === 'like') voteCounts.likes++;
+        else voteCounts.dislikes++;
+      });
+
+      // Update the specific comment's vote counts
+      setComments(prevComments => 
+        prevComments.map(c => 
+          c.id === commentId 
+            ? { ...c, likes: voteCounts.likes, dislikes: voteCounts.dislikes }
+            : c
+        )
+      );
     } catch (err) {
       console.error('Error voting:', err);
       setError('Failed to vote. Please try again.');
