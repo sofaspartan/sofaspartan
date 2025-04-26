@@ -3,10 +3,12 @@ import { MusicPlayer } from '../components/MusicPlayer';
 import { TrackList } from '../components/TrackList';
 import { BackgroundOverlay } from '../components/BackgroundOverlay';
 import Comments from '../components/Comments';
-import { EnvelopeIcon } from '@heroicons/react/24/outline';
+import { EnvelopeIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSoundcloud } from '@fortawesome/free-brands-svg-icons';
 import * as mm from 'music-metadata';
+import { MusicalNoteIcon } from '@heroicons/react/24/outline';
+import trackDescriptions from '../data/trackDescriptions.json';
 
 interface Track {
   id: number;
@@ -14,6 +16,8 @@ interface Track {
   artist: string;
   url: string;
   albumArt: string | null;
+  description?: string;
+  tags: string[];
 }
 
 const Index = () => {
@@ -85,13 +89,17 @@ const Index = () => {
               ...track,
               title: metadata.common.title || track.title,
               artist: metadata.common.artist || track.artist,
-              albumArt: albumArt || "/public/sofaspartan_artwork.png?w=400&h=400&fit=crop?w=400&h=400&fit=crop" // Fallback image
+              albumArt: albumArt || "/public/sofaspartan_artwork.png?w=400&h=400&fit=crop?w=400&h=400&fit=crop",
+              description: trackDescriptions[track.title as keyof typeof trackDescriptions]?.description || "No description available",
+              tags: trackDescriptions[track.title as keyof typeof trackDescriptions]?.tags || []
             };
           } catch (error) {
             console.error('Error loading track metadata:', error);
             return {
               ...track,
-              albumArt: "/public/sofaspartan_artwork.png?w=400&h=400&fit=crop" // Fallback image
+              albumArt: "/public/sofaspartan_artwork.png?w=400&h=400&fit=crop",
+              description: trackDescriptions[track.title as keyof typeof trackDescriptions]?.description || "No description available",
+              tags: trackDescriptions[track.title as keyof typeof trackDescriptions]?.tags || []
             };
           }
         })
@@ -199,6 +207,75 @@ const Index = () => {
           audioElement={document.querySelector('audio')}
         />
         
+        {/* Song Information Card */}
+        <div className="mt-2">
+          <div className="max-w-5xl mx-auto px-2 sm:px-6">
+            <div className="bg-white/5 backdrop-blur-xl rounded-lg overflow-hidden shadow-lg mx-2 sm:mx-8 md:mx-0 glass-morphism">
+              <div className="p-6">
+                <div className="border-b border-white/10 pb-4 mb-6">
+                  <h3 className="text-lg md:text-xl font-semibold flex items-center gap-2">
+                    <InformationCircleIcon className="w-5 h-5 text-white/60" />
+                    Song Information
+                  </h3>
+                </div>
+                {currentTrackIndex !== null ? (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="flex flex-col h-full bg-white/5 rounded-lg p-4 border border-white/10">
+                      <h4 className="text-sm font-medium text-white/60 mb-2">Current Track</h4>
+                      <div className="flex-grow flex items-center justify-center">
+                        <div className="flex flex-col items-center gap-4">
+                          <div className="w-16 h-16 rounded-lg overflow-hidden shadow-lg">
+                            {tracks[currentTrackIndex].albumArt ? (
+                              <img 
+                                src={tracks[currentTrackIndex].albumArt} 
+                                alt={`${tracks[currentTrackIndex].title} album art`}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full bg-primary flex items-center justify-center">
+                                <MusicalNoteIcon className="h-6 w-6 text-white" />
+                              </div>
+                            )}
+                          </div>
+                          <div className="text-center">
+                            <p className="text-white/90 font-medium">{tracks[currentTrackIndex].title}</p>
+                            <p className="text-white/60 text-sm">{tracks[currentTrackIndex].artist}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-col h-full bg-white/5 rounded-lg p-4 border border-white/10">
+                      <h4 className="text-sm font-medium text-white/60 mb-2">About</h4>
+                      <p className="text-white/90 leading-relaxed flex-grow">
+                        {tracks[currentTrackIndex].description}
+                      </p>
+                    </div>
+                    <div className="flex flex-col h-full bg-white/5 rounded-lg p-4 border border-white/10">
+                      <h4 className="text-sm font-medium text-white/60 mb-4">Tags</h4>
+                      <div className="flex-grow">
+                        <div className="flex flex-wrap gap-1.5">
+                          {tracks[currentTrackIndex].tags.map((tag, index) => (
+                            <span 
+                              key={index}
+                              className="px-2 py-0.5 bg-white/10 rounded-full text-white/80"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-white/60">
+                    <p>Choose a song to see its information here</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+        
         {/* Comments Section */}
         <div className="mt-8">
           <Comments />
@@ -212,27 +289,27 @@ const Index = () => {
               href="https://soundcloud.com/sofaspartan" 
               target="_blank" 
               rel="noopener noreferrer"
-              className="flex items-center justify-center gap-0 md:gap-2 aspect-square w-10 h-10 md:aspect-auto md:px-4 md:py-2 md:w-auto md:h-auto rounded-full md:rounded-lg bg-white/5 hover:bg-white/10 transition-all duration-200 group"
+              className="flex items-center justify-center gap-0 md:gap-2 aspect-square w-12 h-12 md:aspect-auto md:px-4 md:py-2 md:w-auto md:h-auto rounded-full md:rounded-lg bg-white/5 hover:bg-white/10 transition-all duration-200 group"
             >
-              <FontAwesomeIcon icon={faSoundcloud} className="w-4 h-4 md:w-5 md:h-5 text-white/60 group-hover:text-white transition-colors" />
+              <FontAwesomeIcon icon={faSoundcloud} className="w-6 h-6 md:w-5 md:h-5 text-white/60 group-hover:text-white transition-colors" />
               <span className="hidden md:inline text-sm text-white/60 group-hover:text-white transition-colors">SoundCloud</span>
             </a>
             <a 
               href="https://www.instagram.com/sofaspartan/" 
               target="_blank" 
               rel="noopener noreferrer"
-              className="flex items-center justify-center gap-0 md:gap-2 aspect-square w-10 h-10 md:aspect-auto md:px-4 md:py-2 md:w-auto md:h-auto rounded-full md:rounded-lg bg-white/5 hover:bg-white/10 transition-all duration-200 group"
+              className="flex items-center justify-center gap-0 md:gap-2 aspect-square w-12 h-12 md:aspect-auto md:px-4 md:py-2 md:w-auto md:h-auto rounded-full md:rounded-lg bg-white/5 hover:bg-white/10 transition-all duration-200 group"
             >
-              <svg className="w-4 h-4 md:w-5 md:h-5 text-white/60 group-hover:text-white transition-colors" viewBox="0 0 24 24" fill="currentColor">
+              <svg className="w-6 h-6 md:w-5 md:h-5 text-white/60 group-hover:text-white transition-colors" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
               </svg>
               <span className="hidden md:inline text-sm text-white/60 group-hover:text-white transition-colors">Instagram</span>
             </a>
             <a 
               href="mailto:sofaspartan.music@gmail.com"
-              className="flex items-center justify-center gap-0 md:gap-2 aspect-square w-10 h-10 md:aspect-auto md:px-4 md:py-2 md:w-auto md:h-auto rounded-full md:rounded-lg bg-white/5 hover:bg-white/10 transition-all duration-200 group"
+              className="flex items-center justify-center gap-0 md:gap-2 aspect-square w-12 h-12 md:aspect-auto md:px-4 md:py-2 md:w-auto md:h-auto rounded-full md:rounded-lg bg-white/5 hover:bg-white/10 transition-all duration-200 group"
             >
-              <EnvelopeIcon className="w-4 h-4 md:w-5 md:h-5 text-white/60 group-hover:text-white transition-colors" />
+              <EnvelopeIcon className="w-6 h-6 md:w-5 md:h-5 text-white/60 group-hover:text-white transition-colors" />
               <span className="hidden md:inline text-sm text-white/60 group-hover:text-white transition-colors">Email</span>
             </a>
           </div>

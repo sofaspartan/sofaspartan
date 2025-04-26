@@ -1,0 +1,46 @@
+{
+  "Blazing Through Space": {
+    "description": "An electrifying 8-bit journey through the stars, Blazing Through Space delivers high-energy rhythms and relentless momentum, capturing the feeling of racing through distant galaxies.",
+    "tags": ["8-bit", "chiptune", "high energy", "retro", "electronic", "adventure", "fast-paced"]
+  },
+  "Lucid": {
+    "description": "Lucid drifts through dreamy electronic soundscapes, layering soft textures and hypnotic melodies into a track that feels like floating through a vivid, endless dream.",
+    "tags": ["electronic", "dreamy", "trance", "ambient", "melodic", "chill", "atmospheric"]
+  },
+  "Static": {
+    "description": "With glitchy beats and dynamic vocal chops, Static moves fast and sharp, blending electronic textures into a track that's as energetic as it is unpredictable.",
+    "tags": ["glitch", "upbeat", "electronic", "vocal chops", "experimental", "energetic", "digital"]
+  },
+  "HappiErr": {
+    "description": "A bright and lively 8-bit track with glitch influences, HappiErr captures a playful sense of movement and wonder, balancing digital chaos with uplifting melodies.",
+    "tags": ["8-bit", "glitch", "playful", "chiptune", "happy", "video game", "colorful"]
+  },
+  "Amped": {
+    "description": "Driven by pulsing beats and vocal cuts, Amped builds a powerful sense of momentum—an energetic track designed to push forward with intensity and focus.",
+    "tags": ["electronic", "pulsing", "vocal chops", "energetic", "driving", "synth", "workout"]
+  },
+  "Powered Up": {
+    "description": "Powered Up delivers an explosive combination of soaring energy, chopped vocals, and rapid-fire beats, creating a track built for moments of peak intensity.",
+    "tags": ["high energy", "electronic", "vocal chops", "hype", "aggressive", "adrenaline", "fast-paced"]
+  },
+  "Artificial Reality": {
+    "description": "Blurring the line between the organic and the digital, Artificial Reality layers smooth electronic sounds and vocal fragments into a vivid, dreamlike experience.",
+    "tags": ["electronic", "dreamy", "ambient", "futuristic", "chill", "vocal chops", "synthwave"]
+  },
+  "Icy Apex": {
+    "description": "Cold, sharp synths and sweeping atmospheres define Icy Apex, a track that captures the vastness and isolation of frozen mountains, balancing beauty with tension.",
+    "tags": ["ambient", "cinematic", "dark", "synth", "cold", "atmospheric", "epic"]
+  },
+  "Funky Times in the Sewers": {
+    "description": "A playful, rhythm-driven track that blends funky basslines with experimental sound effects, Funky Times in the Sewers creates a vivid, kinetic world just below the surface.",
+    "tags": ["funky", "playful", "experimental", "bass-driven", "quirky", "upbeat", "creative"]
+  },
+  "Chasing Vapor": {
+    "description": "Chasing Vapor pulses with the energy of late-night cityscapes, blending deep synthwave bass with glowing melodies for a track built for endless motion.",
+    "tags": ["synthwave", "retro", "bass-heavy", "neon", "nighttime", "driving", "atmospheric"]
+  },
+  "Roar": {
+    "description": "Built around powerful beats and a signature roaring sound, Roar is an intense, high-energy track designed to command attention and drive unstoppable momentum.",
+    "tags": ["high energy", "powerful", "cinematic", "aggressive", "electronic", "anthemic", "intense"]
+  }
+} 

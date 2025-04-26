@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { ChevronDown, ChevronUp, Reply, Settings, X, LogOut, SortAsc, SortDesc, ThumbsUp, ThumbsDown, LogIn, UserPlus, Mail, Flag, Edit, Trash2, Save, AlertTriangle, Star, User, MoreVertical, Filter, Pin } from 'lucide-react';
+import { ChevronDown, ChevronUp, Reply, Settings, X, LogOut, SortAsc, SortDesc, ThumbsUp, ThumbsDown, LogIn, UserPlus, Mail, Flag, Edit, Trash2, Save, AlertTriangle, Star, User, MoreVertical, Filter, Pin, MessageSquare } from 'lucide-react';
 
 // Types
 interface Comment {
@@ -95,6 +95,41 @@ export default function Comments() {
   const [isDeletingComment, setIsDeletingComment] = useState(false);
   const [isCommentsCollapsed, setIsCommentsCollapsed] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Function to format relative time
+  const formatRelativeTime = (date: string) => {
+    const now = new Date();
+    const commentDate = new Date(date);
+    const diffInSeconds = Math.floor((now.getTime() - commentDate.getTime()) / 1000);
+
+    if (diffInSeconds < 60) {
+      return 'just now';
+    }
+
+    const diffInMinutes = Math.floor(diffInSeconds / 60);
+    if (diffInMinutes < 60) {
+      return `${diffInMinutes} ${diffInMinutes === 1 ? 'minute' : 'minutes'} ago`;
+    }
+
+    const diffInHours = Math.floor(diffInMinutes / 60);
+    if (diffInHours < 24) {
+      return `${diffInHours} ${diffInHours === 1 ? 'hour' : 'hours'} ago`;
+    }
+
+    const diffInDays = Math.floor(diffInHours / 24);
+    if (diffInDays < 30) {
+      return `${diffInDays} ${diffInDays === 1 ? 'day' : 'days'} ago`;
+    }
+
+    const diffInMonths = Math.floor(diffInDays / 30);
+    if (diffInMonths < 12) {
+      return `${diffInMonths} ${diffInMonths === 1 ? 'month' : 'months'} ago`;
+    }
+
+    const diffInYears = Math.floor(diffInMonths / 12);
+    return `${diffInYears} ${diffInYears === 1 ? 'year' : 'years'} ago`;
+  };
 
   // Check user authentication and set up session listener
   useEffect(() => {
@@ -520,17 +555,27 @@ export default function Comments() {
       userFlags[comment.id]?.type !== 'pinned'
     );
 
+    // Filter by search query if one exists
+    const filteredUnpinned = searchQuery
+      ? unpinnedComments.filter(comment => 
+          comment.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (comment.user?.user_metadata?.display_name || comment.user?.email || 'Anonymous')
+            .toLowerCase()
+            .includes(searchQuery.toLowerCase())
+        )
+      : unpinnedComments;
+
     // Sort unpinned comments based on sortOrder
-    const sortedUnpinned = [...unpinnedComments].sort((a, b) => {
+    const sortedUnpinned = [...filteredUnpinned].sort((a, b) => {
       switch (sortOrder) {
         case 'oldest':
           return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
         case 'likes':
-          return b.likes - a.likes;
+          return (b.likes || 0) - (a.likes || 0);
         case 'dislikes':
-          return b.dislikes - a.dislikes;
+          return (b.dislikes || 0) - (a.dislikes || 0);
         case 'flagged':
-          return Object.keys(userFlags).includes(b.id) ? 1 : -1;
+          return (userFlags[b.id]?.count || 0) - (userFlags[a.id]?.count || 0);
         case 'latest':
         default:
           return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
@@ -539,7 +584,7 @@ export default function Comments() {
 
     // Return pinned comments first, then sorted unpinned comments
     return [...pinnedComments, ...sortedUnpinned];
-  }, [comments, sortOrder, userFlags]);
+  }, [comments, sortOrder, userFlags, searchQuery]);
 
   // Get replies for a comment
   const getReplies = (commentId: string) => {
@@ -866,12 +911,6 @@ export default function Comments() {
                     </div>
                   </div>
                 )}
-                <span className="text-white/60 text-sm">
-                  {new Date(comment.created_at).toLocaleDateString()}
-                  {comment.updated_at && new Date(comment.updated_at).getTime() > new Date(comment.created_at).getTime() + 1000 && (
-                    <span className="text-xs italic text-white/50 ml-1">(edited)</span>
-                  )}
-                </span>
               </div>
             </div>
 
@@ -901,7 +940,15 @@ export default function Comments() {
                 </div>
               </div>
             ) : (
-              <p className="mb-2 text-white/90 whitespace-pre-wrap">{comment.content}</p>
+              <>
+                <p className="mb-2 text-white/90 whitespace-pre-wrap">{comment.content}</p>
+                <span className="text-white/60 text-sm block mb-2">
+                  {formatRelativeTime(comment.created_at)}
+                  {comment.updated_at && new Date(comment.updated_at).getTime() > new Date(comment.created_at).getTime() + 1000 && (
+                    <span className="text-xs italic text-white/50 ml-1">(edited)</span>
+                  )}
+                </span>
+              </>
             )}
 
             {/* Bottom Actions */}
@@ -1402,114 +1449,97 @@ export default function Comments() {
         <div className={`p-6 ${isCommentsCollapsed ? 'pb-0' : ''}`}>
           {/* Header Section */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4 mb-6">
-            {/* Title, Collapse Toggle, and Sort Dropdown */}
-            <div className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-2">
-                <button 
-                  onClick={() => setIsCommentsCollapsed(!isCommentsCollapsed)}
-                  className="p-1 text-white/60 hover:text-white hover:bg-white/10 rounded-full transition-colors"
-                  title={isCommentsCollapsed ? 'Expand comments' : 'Collapse comments'}
-                >
-                  {isCommentsCollapsed ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}
-                </button>
-                <h2 className="text-2xl font-bold">Comments</h2>
-                {/* Conditionally render Sort button/dropdown */}
-                {!isCommentsCollapsed && (
-                  <div className="relative ml-2 sort-dropdown-container">
+            <div className={`w-full ${isCommentsCollapsed ? '' : 'border-b border-white/10 pb-4'}`}>
+              <div className="flex items-center justify-between w-full">
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => setIsCommentsCollapsed(!isCommentsCollapsed)}
+                    className="p-1 text-white/60 hover:text-white hover:bg-white/10 rounded-full transition-colors"
+                    title={isCommentsCollapsed ? 'Expand comments' : 'Collapse comments'}
+                  >
+                    {isCommentsCollapsed ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}
+                  </button>
+                  <h2 className="text-lg md:text-xl font-semibold">Comments</h2>
+                  {isCommentsCollapsed && (
+                    <span className="text-sm text-white/60 ml-2">Expand to see comments</span>
+                  )}
+                </div>
+                {/* Three Dot Menu - All Screen Sizes */}
+                {user && (
+                  <div className="relative user-menu-container">
                     <button
-                      onClick={() => setShowSortDropdown(!showSortDropdown)}
-                      className="flex items-center gap-1 text-sm text-white/60 hover:text-white transition-colors border border-white/10 px-3 py-1 rounded-lg"
+                      onClick={() => setShowUserMenu(!showUserMenu)}
+                      className="pl-3 pr-1.5 py-1.5 rounded-full text-white/60 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-1 border border-white/10"
                     >
-                      <Filter className="w-4 h-4" />
-                      <ChevronDown className={`w-4 h-4 transition-transform ${showSortDropdown ? 'rotate-180' : ''}`} />
+                      {user.user_metadata?.avatar_url ? (
+                        <img 
+                          src={user.user_metadata.avatar_url} 
+                          alt={`${user.user_metadata?.display_name || user.email}'s avatar`} 
+                          className="w-8 h-8 rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white/60 text-sm">
+                          {(user.user_metadata?.display_name || user.email).charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <MoreVertical className="w-4 h-4" />
                     </button>
-                    {showSortDropdown && (
-                      <div className="absolute top-full left-0 mt-1 w-44 bg-[#2c2c2c] border border-white/20 rounded-lg shadow-lg z-10 py-1">
-                        <button onClick={() => { setSortOrder('latest'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><SortDesc className='w-4 h-4'/> Latest</button>
-                        <button onClick={() => { setSortOrder('oldest'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><SortAsc className='w-4 h-4'/> Oldest</button>
-                        <button onClick={() => { setSortOrder('likes'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><ThumbsUp className='w-4 h-4'/> Most Upvoted</button>
-                        <button onClick={() => { setSortOrder('dislikes'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><ThumbsDown className='w-4 h-4'/> Most Downvoted</button>
-                        <button onClick={() => { setSortOrder('flagged'); setShowSortDropdown(false); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2"><Flag className='w-4 h-4'/> Flagged</button>
+                    {showUserMenu && (
+                      <div className="absolute top-full right-0 mt-1 w-48 bg-[#2c2c2c] border border-white/20 rounded-lg shadow-lg z-20 py-1">
+                        <div className="px-3 py-3 text-sm text-white/60 border-b border-white/10 flex flex-col items-center gap-2">
+                          <div className="w-12 h-12 rounded-full overflow-hidden bg-white/10">
+                            {user.user_metadata?.avatar_url ? (
+                              <img 
+                                src={user.user_metadata.avatar_url} 
+                                alt={`${user.user_metadata?.display_name || user.email}'s avatar`} 
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-white/60 text-lg">
+                                {(user.user_metadata?.display_name || user.email).charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                          </div>
+                          <span className="text-center font-medium text-base text-white/90">{user.user_metadata?.display_name || user.email}</span>
+                          <div className="flex items-center gap-1.5 text-xs">
+                            {user.user_metadata?.user_type === 'admin' ? (
+                              <>
+                                <Star className="w-3.5 h-3.5 text-yellow-400" />
+                                <span className="text-yellow-400">Admin</span>
+                              </>
+                            ) : (
+                              <>
+                                <User className="w-3.5 h-3.5 text-white/60" />
+                                <span className="text-white/60">User</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            openSettingsModal();
+                            setShowUserMenu(false);
+                          }}
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-white/10 flex items-center gap-2"
+                        >
+                          <Settings className="w-4 h-4" />
+                          Settings
+                        </button>
+                        <button
+                          onClick={() => {
+                            handleSignOut();
+                            setShowUserMenu(false);
+                          }}
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-white/10 flex items-center gap-2"
+                        >
+                          <LogOut className="w-4 h-4" />
+                          Sign Out
+                        </button>
                       </div>
                     )}
                   </div>
                 )}
               </div>
-              {/* Three Dot Menu - All Screen Sizes */}
-              {user && (
-                <div className="relative user-menu-container">
-                  <button
-                    onClick={() => setShowUserMenu(!showUserMenu)}
-                    className="pl-3 pr-1.5 py-1.5 rounded-full text-white/60 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-1 border border-white/10"
-                  >
-                    {user.user_metadata?.avatar_url ? (
-                      <img 
-                        src={user.user_metadata.avatar_url} 
-                        alt={`${user.user_metadata?.display_name || user.email}'s avatar`} 
-                        className="w-8 h-8 rounded-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white/60 text-sm">
-                        {(user.user_metadata?.display_name || user.email).charAt(0).toUpperCase()}
-                      </div>
-                    )}
-                    <MoreVertical className="w-4 h-4" />
-                  </button>
-                  {showUserMenu && (
-                    <div className="absolute top-full right-0 mt-1 w-48 bg-[#2c2c2c] border border-white/20 rounded-lg shadow-lg z-20 py-1">
-                      <div className="px-3 py-3 text-sm text-white/60 border-b border-white/10 flex flex-col items-center gap-2">
-                        <div className="w-12 h-12 rounded-full overflow-hidden bg-white/10">
-                          {user.user_metadata?.avatar_url ? (
-                            <img 
-                              src={user.user_metadata.avatar_url} 
-                              alt={`${user.user_metadata?.display_name || user.email}'s avatar`} 
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-white/60 text-lg">
-                              {(user.user_metadata?.display_name || user.email).charAt(0).toUpperCase()}
-                            </div>
-                          )}
-                        </div>
-                        <span className="text-center font-medium text-base text-white/90">{user.user_metadata?.display_name || user.email}</span>
-                        <div className="flex items-center gap-1.5 text-xs">
-                          {user.user_metadata?.user_type === 'admin' ? (
-                            <>
-                              <Star className="w-3.5 h-3.5 text-yellow-400" />
-                              <span className="text-yellow-400">Admin</span>
-                            </>
-                          ) : (
-                            <>
-                              <User className="w-3.5 h-3.5 text-white/60" />
-                              <span className="text-white/60">User</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          openSettingsModal();
-                          setShowUserMenu(false);
-                        }}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-white/10 flex items-center gap-2"
-                      >
-                        <Settings className="w-4 h-4" />
-                        Settings
-                      </button>
-                      <button
-                        onClick={() => {
-                          handleSignOut();
-                          setShowUserMenu(false);
-                        }}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-white/10 flex items-center gap-2"
-                      >
-                        <LogOut className="w-4 h-4" />
-                        Sign Out
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           </div>
           
@@ -1707,17 +1737,104 @@ export default function Comments() {
                             .filter(comment => userFlags[comment.id]?.type === 'pinned')
                             .map(comment => renderComment(comment))}
                         </div>
-                        {sortedComments.some(comment => userFlags[comment.id]?.type !== 'pinned') && (
-                          <div className="h-px bg-white/10 my-6"></div>
-                        )}
                       </div>
                     )}
                     {/* Regular Comments Section */}
-                    <div className="space-y-4">
-                      {sortedComments
-                        .filter(comment => userFlags[comment.id]?.type !== 'pinned')
-                        .slice(0, visibleCommentCount)
-                        .map(comment => renderComment(comment))}
+                    <div className="space-y-4 mb-12">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 mb-4 mt-8">
+                        <h3 className="text-lg font-semibold flex items-center gap-2">
+                          <MessageSquare className="w-5 h-5 text-white/60" />
+                          All Comments
+                        </h3>
+                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                          <div className="relative flex-grow">
+                            <input
+                              type="text"
+                              placeholder="Search comments..."
+                              className="w-full px-3 py-1 text-sm bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/40 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                              value={searchQuery}
+                              onChange={(e) => setSearchQuery(e.target.value)}
+                            />
+                            {searchQuery && (
+                              <button
+                                onClick={() => setSearchQuery('')}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/60"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                          <div className="relative sort-dropdown-container flex-shrink-0">
+                            <button
+                              onClick={() => setShowSortDropdown(!showSortDropdown)}
+                              className="flex items-center gap-1 text-sm text-white/60 hover:text-white transition-colors border border-white/10 px-3 py-1 rounded-lg"
+                            >
+                              <Filter className="w-4 h-4" />
+                              <ChevronDown className={`w-4 h-4 transition-transform ${showSortDropdown ? 'rotate-180' : ''}`} />
+                            </button>
+                            {showSortDropdown && (
+                              <div className="absolute top-full right-0 mt-1 w-44 bg-[#2c2c2c] border border-white/20 rounded-lg shadow-lg z-10 py-1">
+                                <button 
+                                  onClick={() => {
+                                    setSortOrder('latest');
+                                    setShowSortDropdown(false);
+                                  }} 
+                                  className={`w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2 ${sortOrder === 'latest' ? 'text-primary' : ''}`}
+                                >
+                                  <SortDesc className='w-4 h-4'/> Latest
+                                </button>
+                                <button 
+                                  onClick={() => {
+                                    setSortOrder('oldest');
+                                    setShowSortDropdown(false);
+                                  }} 
+                                  className={`w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2 ${sortOrder === 'oldest' ? 'text-primary' : ''}`}
+                                >
+                                  <SortAsc className='w-4 h-4'/> Oldest
+                                </button>
+                                <button 
+                                  onClick={() => {
+                                    setSortOrder('likes');
+                                    setShowSortDropdown(false);
+                                  }} 
+                                  className={`w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2 ${sortOrder === 'likes' ? 'text-primary' : ''}`}
+                                >
+                                  <ThumbsUp className='w-4 h-4'/> Most Upvoted
+                                </button>
+                                <button 
+                                  onClick={() => {
+                                    setSortOrder('dislikes');
+                                    setShowSortDropdown(false);
+                                  }} 
+                                  className={`w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2 ${sortOrder === 'dislikes' ? 'text-primary' : ''}`}
+                                >
+                                  <ThumbsDown className='w-4 h-4'/> Most Downvoted
+                                </button>
+                                <button 
+                                  onClick={() => {
+                                    setSortOrder('flagged');
+                                    setShowSortDropdown(false);
+                                  }} 
+                                  className={`w-full text-left px-3 py-1.5 text-sm hover:bg-white/10 flex items-center gap-2 ${sortOrder === 'flagged' ? 'text-primary' : ''}`}
+                                >
+                                  <Flag className='w-4 h-4'/> Flagged
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {sortedComments.filter(comment => userFlags[comment.id]?.type !== 'pinned').length > 0 ? (
+                        sortedComments
+                          .filter(comment => userFlags[comment.id]?.type !== 'pinned')
+                          .slice(0, visibleCommentCount)
+                          .map(comment => renderComment(comment))
+                      ) : (
+                        <div className="text-center py-8 text-white/60">
+                          <p className="text-sm">No comments yet</p>
+                          <p className="text-xs mt-1">Be the first to share your thoughts!</p>
+                        </div>
+                      )}
                     </div>
                   </>
                 ) : (

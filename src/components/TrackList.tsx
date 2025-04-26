@@ -129,114 +129,122 @@ export const TrackList = ({ tracks, onTrackSelect, currentTrack, isPlaying, audi
         className="bg-white/5 backdrop-blur-xl rounded-lg overflow-hidden shadow-lg mx-2 sm:mx-8 md:mx-0 glass-morphism"
         ref={containerRef}
       >
-        <div className="flex flex-col md:flex-row gap-4 md:gap-8 p-3 md:p-6">
-          {/* Album Art and Title */}
-          <div className="flex flex-row md:flex-col items-center justify-center gap-4 md:gap-0">
-            <div className="flex-shrink-0">
-              <div 
-                className="w-[120px] h-[120px] md:w-[320px] md:h-[320px] rounded-lg overflow-hidden shadow-lg transition-transform duration-100"
-                style={{
-                  transform: window.innerWidth >= 768 
-                    ? `perspective(1000px) rotateX(${tiltY}deg) rotateY(${tiltX}deg)`
-                    : 'none',
-                  transformStyle: 'preserve-3d'
-                }}
-              >
-                {currentTrack?.albumArt ? (
-                  <img 
-                    src={currentTrack.albumArt} 
-                    alt="Album art"
-                    className="w-full h-full object-cover"
-                  />
+        <div className="p-6">
+          <div className="border-b border-white/10 pb-4 mb-6">
+            <h3 className="text-lg md:text-xl font-semibold flex items-center gap-2">
+              <MusicalNoteIcon className="w-5 h-5 text-white/60" />
+              Track List
+            </h3>
+          </div>
+          <div className="flex flex-col md:flex-row gap-4 md:gap-8">
+            {/* Album Art and Title */}
+            <div className="flex flex-row md:flex-col items-center justify-center gap-4 md:gap-0">
+              <div className="flex-shrink-0">
+                <div 
+                  className="w-[120px] h-[120px] md:w-[320px] md:h-[320px] rounded-lg overflow-hidden shadow-lg transition-transform duration-100"
+                  style={{
+                    transform: window.innerWidth >= 768 
+                      ? `perspective(1000px) rotateX(${tiltY}deg) rotateY(${tiltX}deg)`
+                      : 'none',
+                    transformStyle: 'preserve-3d'
+                  }}
+                >
+                  {currentTrack?.albumArt ? (
+                    <img 
+                      src={currentTrack.albumArt} 
+                      alt="Album art"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-primary flex items-center justify-center">
+                      <MusicalNoteIcon className="h-12 w-12 md:h-24 md:w-24 text-white" />
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="text-left md:text-center md:mt-4">
+                {currentTrack ? (
+                  <>
+                    <h2 className="text-lg md:text-2xl font-bold">{currentTrack.title}</h2>
+                    <p className="text-sm md:text-lg text-muted-foreground">{currentTrack.artist}</p>
+                  </>
                 ) : (
-                  <div className="w-full h-full bg-primary flex items-center justify-center">
-                    <MusicalNoteIcon className="h-12 w-12 md:h-24 md:w-24 text-white" />
-                  </div>
+                  <>
+                    <h2 className="text-lg md:text-2xl font-bold">Track Collection</h2>
+                    <p className="text-sm md:text-lg text-muted-foreground">sofaspartan</p>
+                  </>
                 )}
               </div>
             </div>
-            <div className="text-left md:text-center md:mt-4">
-              {currentTrack ? (
-                <>
-                  <h2 className="text-lg md:text-2xl font-bold">{currentTrack.title}</h2>
-                  <p className="text-sm md:text-lg text-muted-foreground">{currentTrack.artist}</p>
-                </>
-              ) : (
-                <>
-                  <h2 className="text-lg md:text-2xl font-bold">Track Collection</h2>
-                  <p className="text-sm md:text-lg text-muted-foreground">sofaspartan</p>
-                </>
+
+            {/* Track List */}
+            <div className="flex-grow relative">
+              <div 
+                ref={listRef}
+                className="h-[280px] md:h-[400px] overflow-y-auto pr-2 md:pr-4"
+              >
+                {tracks.map((track) => {
+                  const isCurrentTrack = currentTrack?.id === track.id;
+                  return (
+                    <div
+                      key={track.id}
+                      data-track-id={track.id}
+                      className={`flex items-center gap-3 md:gap-4 p-3 md:p-4 hover:bg-white/10 transition-all duration-200 cursor-pointer group rounded-lg ${
+                        isCurrentTrack ? 'bg-primary/10' : ''
+                      }`}
+                      onClick={() => onTrackSelect(track)}
+                    >
+                      <div className="text-muted-foreground text-base md:text-base w-6 flex-shrink-0 group-hover:text-white transition-colors">
+                        {track.id}
+                      </div>
+                      <div className="relative aspect-square w-10 h-10 md:w-16 md:h-16 rounded-sm md:rounded-lg overflow-hidden flex-shrink-0 group-hover:scale-105 transition-transform duration-200">
+                        <img 
+                          src={track.albumArt} 
+                          alt={`${track.title} album art`}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                      <div className="min-w-0 flex-grow">
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-medium truncate text-base md:text-base group-hover:text-white transition-colors">
+                            {track.title}
+                          </h3>
+                          {isCurrentTrack && (
+                            <AudioSpectrum isPlaying={isPlaying} audioElement={audioElement} className="hidden md:block" />
+                          )}
+                        </div>
+                        <p className="text-sm md:text-sm text-muted-foreground truncate group-hover:text-white/80 transition-colors">
+                          {track.artist}
+                        </p>
+                      </div>
+                      <div className="flex-shrink-0">
+                        <div className={`p-1 md:p-2 rounded-full h-8 w-8 md:h-10 md:w-10 flex items-center justify-center transition-all duration-200 ${
+                          isCurrentTrack ? 'bg-primary group-hover:scale-110' : 'bg-primary/20 group-hover:bg-primary/30'
+                        }`}>
+                          {isCurrentTrack ? (
+                            isPlaying ? (
+                              <PauseIcon className="h-4 w-4 md:h-4 md:w-4 text-white" />
+                            ) : (
+                              <PlayIcon className="h-4 w-4 md:h-4 md:w-4 text-white" />
+                            )
+                          ) : (
+                            <MusicalNoteIcon className="h-4 w-4 md:h-4 md:w-4 text-white/40 group-hover:text-white/60" />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {showScrollIndicator && (
+                <div className="absolute bottom-0 left-0 right-0 flex justify-center pb-1 md:pb-2">
+                  <div className="bg-primary text-white text-xs px-2 md:px-3 py-1 rounded-full flex items-center gap-1">
+                    <ChevronDown className="h-3 w-3" />
+                    Scroll
+                  </div>
+                </div>
               )}
             </div>
-          </div>
-
-          {/* Track List */}
-          <div className="flex-grow relative">
-            <div 
-              ref={listRef}
-              className="h-[280px] md:h-[400px] overflow-y-auto pr-2 md:pr-4"
-            >
-              {tracks.map((track) => {
-                const isCurrentTrack = currentTrack?.id === track.id;
-                return (
-                  <div
-                    key={track.id}
-                    data-track-id={track.id}
-                    className={`flex items-center gap-3 md:gap-4 p-3 md:p-4 hover:bg-white/10 transition-all duration-200 cursor-pointer group rounded-lg ${
-                      isCurrentTrack ? 'bg-primary/10' : ''
-                    }`}
-                    onClick={() => onTrackSelect(track)}
-                  >
-                    <div className="text-muted-foreground text-base md:text-base w-6 flex-shrink-0 group-hover:text-white transition-colors">
-                      {track.id}
-                    </div>
-                    <div className="relative aspect-square w-10 h-10 md:w-16 md:h-16 rounded-sm md:rounded-lg overflow-hidden flex-shrink-0 group-hover:scale-105 transition-transform duration-200">
-                      <img 
-                        src={track.albumArt} 
-                        alt={`${track.title} album art`}
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                    <div className="min-w-0 flex-grow">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-medium truncate text-base md:text-base group-hover:text-white transition-colors">
-                          {track.title}
-                        </h3>
-                        {isCurrentTrack && (
-                          <AudioSpectrum isPlaying={isPlaying} audioElement={audioElement} className="hidden md:block" />
-                        )}
-                      </div>
-                      <p className="text-sm md:text-sm text-muted-foreground truncate group-hover:text-white/80 transition-colors">
-                        {track.artist}
-                      </p>
-                    </div>
-                    <div className="flex-shrink-0">
-                      <div className={`p-1 md:p-2 rounded-full h-8 w-8 md:h-10 md:w-10 flex items-center justify-center transition-all duration-200 ${
-                        isCurrentTrack ? 'bg-primary group-hover:scale-110' : 'bg-primary/20 group-hover:bg-primary/30'
-                      }`}>
-                        {isCurrentTrack ? (
-                          isPlaying ? (
-                            <PauseIcon className="h-4 w-4 md:h-4 md:w-4 text-white" />
-                          ) : (
-                            <PlayIcon className="h-4 w-4 md:h-4 md:w-4 text-white" />
-                          )
-                        ) : (
-                          <MusicalNoteIcon className="h-4 w-4 md:h-4 md:w-4 text-white/40 group-hover:text-white/60" />
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            {showScrollIndicator && (
-              <div className="absolute bottom-0 left-0 right-0 flex justify-center pb-1 md:pb-2">
-                <div className="bg-primary text-white text-xs px-2 md:px-3 py-1 rounded-full flex items-center gap-1">
-                  <ChevronDown className="h-3 w-3" />
-                  Scroll
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>
