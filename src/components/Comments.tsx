@@ -601,14 +601,6 @@ export default function Comments() {
     const isEditing = editingCommentId === comment.id;
     const isCommenterAdmin = comment.user?.user_metadata?.user_type === 'admin';
 
-    console.log('Comment render debug:', {
-      commentId: comment.id,
-      isAdmin,
-      userType: user?.user_metadata?.user_type,
-      isFlagged,
-      flagCount
-    });
-
     const displayName = comment.user?.user_metadata?.display_name || comment.user?.email || 'Anonymous';
     const avatarUrl = comment.user?.user_metadata?.avatar_url;
     const fallbackInitial = displayName.charAt(0).toUpperCase();
@@ -629,7 +621,7 @@ export default function Comments() {
         {/* Comment Column */}
         <div className="flex-grow space-y-4">
           <div className="border border-white/10 rounded-lg p-4 bg-white/5 relative group">
-            {/* Top Right Actions (Flag, Edit, Delete) */} 
+            {/* Top Right Actions */}
             <div className="absolute top-1 right-1 flex items-center gap-1">
               {isFlagged && (
                 <div className={`flex items-center gap-1 ${userFlags[comment.id]?.type === 'pinned' ? 'text-yellow-400' : 'text-yellow-500'} ${!user ? 'mt-2 mr-2' : ''}`} 
@@ -829,11 +821,12 @@ export default function Comments() {
               )}
             </div>
 
-          <div className="flex justify-between items-start mb-2">
+            {/* Comment Header */}
+            <div className="flex justify-between items-start mb-2">
               <div className="flex items-center gap-2">
-              <span className="font-medium text-white/90">
+                <span className="font-medium text-white/90">
                   {displayName}
-              </span>
+                </span>
                 {isCommenterAdmin ? (
                   <div className="relative inline-block">
                     <div className="bg-yellow-400/20 rounded-full p-0.5">
@@ -874,13 +867,13 @@ export default function Comments() {
                   </div>
                 )}
                 <span className="text-white/60 text-sm">
-                {new Date(comment.created_at).toLocaleDateString()}
+                  {new Date(comment.created_at).toLocaleDateString()}
                   {comment.updated_at && new Date(comment.updated_at).getTime() > new Date(comment.created_at).getTime() + 1000 && (
                     <span className="text-xs italic text-white/50 ml-1">(edited)</span>
                   )}
-              </span>
+                </span>
+              </div>
             </div>
-          </div>
 
             {/* Content or Edit Form */}
             {isEditing ? (
@@ -911,7 +904,7 @@ export default function Comments() {
               <p className="mb-2 text-white/90 whitespace-pre-wrap">{comment.content}</p>
             )}
 
-            {/* Bottom Actions (Vote, Reply, Toggle) */} 
+            {/* Bottom Actions */}
             {!isEditing && (
               <div className="flex items-center space-x-4 mt-2">
                 <button
@@ -961,9 +954,10 @@ export default function Comments() {
                 )}
               </div>
             )}
-            
-            {/* Reply Form */} 
-            {replyingTo === comment.id && !isEditing && (
+          </div>
+
+          {/* Reply Form */}
+          {replyingTo === comment.id && !isEditing && (
             <form onSubmit={handleSubmit} className="mt-4">
               <div className="mb-4">
                 <textarea
@@ -993,12 +987,13 @@ export default function Comments() {
               </div>
             </form>
           )}
-        </div>
-        {hasReplies && isExpanded && (
-          <div className="space-y-4">
-            {replies.map(reply => renderComment(reply, level + 1))}
-          </div>
-        )}
+
+          {/* Replies */}
+          {hasReplies && isExpanded && (
+            <div className="space-y-4">
+              {replies.map(reply => renderComment(reply, level + 1))}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -1328,42 +1323,22 @@ export default function Comments() {
     setError(null);
     
     try {
-      // First delete all comments by this user
-      const { error: commentsError } = await supabase
-        .from('comments')
-        .delete()
-        .eq('user_id', user.id);
-      
-      if (commentsError) throw commentsError;
+      // Call the Edge Function to handle account deletion
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('No active session');
 
-      // Delete all flags by this user
-      const { error: flagsError } = await supabase
-        .from('flags')
-        .delete()
-        .eq('user_id', user.id);
-      
-      if (flagsError) throw flagsError;
+      const response = await fetch(`${supabaseUrl}/functions/v1/delete-account`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+      });
 
-      // Delete all votes by this user
-      const { error: votesError } = await supabase
-        .from('votes')
-        .delete()
-        .eq('user_id', user.id);
-      
-      if (votesError) throw votesError;
-
-      // Delete the user's profile
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .delete()
-        .eq('id', user.id);
-      
-      if (profileError) throw profileError;
-
-      // Finally, delete the auth user
-      const { error: authError } = await supabase.auth.admin.deleteUser(user.id);
-      
-      if (authError) throw authError;
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to delete account');
+      }
 
       // Close modals and sign out
       setShowDeleteAccountModal(false);
@@ -1371,7 +1346,7 @@ export default function Comments() {
       setUser(null);
     } catch (err) {
       console.error('Error deleting account:', err);
-      setError('Failed to delete account. Please try again.');
+      setError(err instanceof Error ? err.message : 'Failed to delete account. Please try again.');
     } finally {
       setIsDeletingAccount(false);
     }
