@@ -456,6 +456,7 @@ export const TrackList = ({ tracks, onTrackSelect, currentTrack, isPlaying, audi
                                 }}
                                 userReaction={userReactions[track.id]}
                                 onReaction={(_, type) => handleTrackReaction(track.id, type)}
+                                user={user}
                               />
                             </div>
                           </div>
