@@ -350,14 +350,12 @@ export const TrackList = ({ tracks, onTrackSelect, currentTrack, isPlaying, audi
                 <MusicalNoteIcon className="w-5 h-5 text-white/60" />
                 Track List
               </h3>
-              {currentTrack && (
-                <div className="flex items-center gap-2">
-                  <ShareButton 
-                    url={window.location.href}
-                    title={`${currentTrack.title} by ${currentTrack.artist}`}
-                  />
-                </div>
-              )}
+              <div className="flex items-center gap-2">
+                <ShareButton 
+                  url={window.location.href}
+                  title="Track Collection by sofaspartan"
+                />
+              </div>
             </div>
           </div>
           <div className="flex flex-col md:flex-row gap-4 md:gap-8">
