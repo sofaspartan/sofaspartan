@@ -346,7 +346,7 @@ BEGIN
     -- Send email notification
     PERFORM
         net.http_post(
-            url := 'https://tdgatkfrfaejitdafeas.supabase.co/functions/v1/send-email',
+            url := 'https://tdgatkfrfaejitdafeas.supabase.co/functions/v1/comment-notification',
             headers := jsonb_build_object(
                 'Content-Type', 'application/json',
                 'Authorization', 'Bearer ' || current_setting('app.settings.service_role_key')

@@ -1,7 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { ChevronDown, ChevronUp, Reply, Settings, X, LogOut, SortAsc, SortDesc, ThumbsUp, ThumbsDown, LogIn, UserPlus, Mail, Flag, Edit, Trash2, Save, AlertTriangle, Star, User, MoreVertical, Filter, Pin, MessageSquare, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { toast } from "@/components/ui/use-toast";
+import { showToast } from "./ToastNotifications";
+import ProfileSettingsModal from './ProfileSettingsModal';
+import DeleteCommentModal from './DeleteCommentModal';
+import ReactionButton from './ReactionButton';
 
 // Types
 interface Comment {
@@ -11,6 +14,11 @@ interface Comment {
   parent_id: string | null;
   likes: number;
   dislikes: number;
+  love_count: number;
+  laugh_count: number;
+  surprise_count: number;
+  sad_count: number;
+  mad_count: number;
   created_at: string;
   updated_at: string;
   user?: {
@@ -27,7 +35,7 @@ interface Vote {
   id: string;
   user_id: string;
   comment_id: string;
-  vote_type: 'like' | 'dislike';
+  vote_type: 'like' | 'dislike' | 'love' | 'laugh' | 'surprise' | 'sad' | 'mad';
   created_at: string;
 }
 
@@ -35,6 +43,7 @@ interface FlagRecord {
   comment_id: string;
   flag_type: 'inappropriate' | 'spam' | 'pinned';
   count?: number;
+  user_id: string;
 }
 
 // Supabase client
@@ -59,7 +68,7 @@ type SortOrder = 'latest' | 'oldest' | 'likes' | 'dislikes' | 'flagged';
 
 export default function Comments() {
   const [comments, setComments] = useState<Comment[]>([]);
-  const [userVotes, setUserVotes] = useState<Record<string, 'like' | 'dislike'>>({});
+  const [userVotes, setUserVotes] = useState<Record<string, 'like' | 'dislike' | 'love' | 'laugh' | 'surprise' | 'sad' | 'mad'>>({});
   const [newComment, setNewComment] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,7 +96,7 @@ export default function Comments() {
   const [resetMessage, setResetMessage] = useState<string | null>(null);
   const [showAuthForm, setShowAuthForm] = useState(false);
   const [visibleCommentCount, setVisibleCommentCount] = useState(3);
-  const [userFlags, setUserFlags] = useState<Record<string, { type: 'inappropriate' | 'spam' | 'pinned', count: number }>>({});
+  const [userFlags, setUserFlags] = useState<Record<string, { type: 'inappropriate' | 'spam' | 'pinned', count: number, userFlags: Record<string, boolean> }>>({});
   const [openFlagMenu, setOpenFlagMenu] = useState<string | null>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState<string>('');
@@ -227,11 +236,11 @@ export default function Comments() {
       if (error) {
         console.error('Sign in error:', error);
         if (error.message.includes('Email not confirmed')) {
-          setError('Please confirm your email address before signing in. Check your email for the confirmation link.');
+          showToast.info.emailNotConfirmed();
         } else {
-          setError(error.message);
+          showToast.error.signIn();
         }
-        return;
+        throw error;
       }
 
       console.log('Sign in successful:', data);
@@ -251,16 +260,7 @@ export default function Comments() {
       const emailName = data.user?.email?.split('@')[0];
       const userName = displayName || emailName || 'User';
       
-      toast({
-        title: (
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4" />
-            Welcome back, {userName}!
-          </div>
-        ),
-        description: "You have successfully signed in",
-        variant: "success",
-      });
+      showToast.success.signIn();
       setEmail('');
       setPassword('');
   };
@@ -288,11 +288,12 @@ export default function Comments() {
 
       if (error) {
         console.error('Sign up error:', error);
-        setError(error.message);
+        showToast.error.signUp();
         return;
       }
 
       console.log('Sign up successful:', data);
+      showToast.success.signUp();
       
       if (data.user?.identities?.length === 0) {
         setError('This email is already registered. Please sign in instead.');
@@ -315,20 +316,11 @@ export default function Comments() {
       const { error } = await supabase.auth.signOut();
       if (error) {
         console.error('Sign out error:', error);
+        showToast.error.signOut();
         throw error;
       }
       
-      console.log('Sign out successful');
-      toast({
-        title: (
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4" />
-            Signed out
-          </div>
-        ),
-        description: "You have successfully signed out",
-        variant: "success",
-      });
+      showToast.success.signOut();
       setUser(null);
     } catch (err) {
       console.error('Error signing out:', err);
@@ -341,25 +333,33 @@ export default function Comments() {
     try {
       const { data, error } = await supabase
         .from('flags')
-        .select('comment_id, flag_type');
+        .select('comment_id, flag_type, user_id');
 
       if (error) throw error;
 
-      // Count flags per comment
+      // Count flags per comment and track user flags
       const flagCounts: Record<string, number> = {};
       const flagTypes: Record<string, 'inappropriate' | 'spam' | 'pinned'> = {};
+      const userFlagMap: Record<string, Record<string, boolean>> = {};
       
-      data.forEach((flag: FlagRecord) => {
+      data.forEach((flag: FlagRecord & { user_id: string }) => {
         flagCounts[flag.comment_id] = (flagCounts[flag.comment_id] || 0) + 1;
         flagTypes[flag.comment_id] = flag.flag_type;
+        
+        // Track which user created which flag
+        if (!userFlagMap[flag.comment_id]) {
+          userFlagMap[flag.comment_id] = {};
+        }
+        userFlagMap[flag.comment_id][flag.user_id] = true;
       });
 
       // Combine counts and types
-      const flags: Record<string, { type: 'inappropriate' | 'spam' | 'pinned', count: number }> = {};
+      const flags: Record<string, { type: 'inappropriate' | 'spam' | 'pinned', count: number, userFlags: Record<string, boolean> }> = {};
       Object.keys(flagCounts).forEach(commentId => {
         flags[commentId] = {
           type: flagTypes[commentId],
-          count: flagCounts[commentId]
+          count: flagCounts[commentId],
+          userFlags: userFlagMap[commentId] || {}
         };
       });
 
@@ -436,27 +436,45 @@ export default function Comments() {
         console.error('Error fetching votes:', votesError);
       }
 
-      // Calculate vote counts for each comment
-      const voteCounts: Record<string, { likes: number, dislikes: number }> = {};
+      // Calculate reaction counts for each comment
+      const reactionCounts: Record<string, {
+        like: number;
+        dislike: number;
+        love: number;
+        laugh: number;
+        surprise: number;
+        sad: number;
+        mad: number;
+      }> = {};
+
       votesData?.forEach((vote: Vote) => {
-        if (!voteCounts[vote.comment_id]) {
-          voteCounts[vote.comment_id] = { likes: 0, dislikes: 0 };
+        if (!reactionCounts[vote.comment_id]) {
+          reactionCounts[vote.comment_id] = {
+            like: 0,
+            dislike: 0,
+            love: 0,
+            laugh: 0,
+            surprise: 0,
+            sad: 0,
+            mad: 0
+          };
         }
-        if (vote.vote_type === 'like') {
-          voteCounts[vote.comment_id].likes++;
-        } else {
-          voteCounts[vote.comment_id].dislikes++;
-        }
+        reactionCounts[vote.comment_id][vote.vote_type]++;
       });
 
-      // Combine comments with user data and vote counts
+      // Combine comments with user data and reaction counts
       const commentsWithUsers = commentsData.map(comment => ({
         ...comment,
         // Find profile if user_id exists, otherwise user is undefined
         user: comment.user_id ? usersData.find(profile => profile.id === comment.user_id) : undefined,
-        // Add vote counts
-        likes: voteCounts[comment.id]?.likes || 0,
-        dislikes: voteCounts[comment.id]?.dislikes || 0
+        // Add reaction counts
+        likes: reactionCounts[comment.id]?.like || 0,
+        dislikes: reactionCounts[comment.id]?.dislike || 0,
+        love_count: reactionCounts[comment.id]?.love || 0,
+        laugh_count: reactionCounts[comment.id]?.laugh || 0,
+        surprise_count: reactionCounts[comment.id]?.surprise || 0,
+        sad_count: reactionCounts[comment.id]?.sad || 0,
+        mad_count: reactionCounts[comment.id]?.mad || 0
       }));
 
       console.log('Setting comments state with combined data.');
@@ -487,7 +505,7 @@ export default function Comments() {
       console.log('Fetched votes:', data);
 
       // Convert votes array to a record of comment_id -> vote_type
-      const votes: Record<string, 'like' | 'dislike'> = {};
+      const votes: Record<string, 'like' | 'dislike' | 'love' | 'laugh' | 'surprise' | 'sad' | 'mad'> = {};
       data.forEach((vote: Vote) => {
         votes[vote.comment_id] = vote.vote_type;
       });
@@ -532,6 +550,7 @@ export default function Comments() {
           details: insertError.details,
           hint: insertError.hint
         });
+        showToast.error.commentPost();
         throw insertError;
       }
 
@@ -546,6 +565,7 @@ export default function Comments() {
 
       if (fetchError) {
         console.error('Error fetching new comment:', fetchError);
+        showToast.error.commentFetch();
         throw fetchError;
       }
       
@@ -562,17 +582,7 @@ export default function Comments() {
       setNewComment('');
       setReplyingTo(null);
 
-      // Show success toast
-      toast({
-        title: (
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4" />
-            {replyingTo ? 'Reply posted' : 'Comment posted'}
-          </div>
-        ),
-        description: replyingTo ? 'Your reply has been posted successfully' : 'Your comment has been posted successfully',
-        variant: "success",
-      });
+      showToast.success.commentPosted();
     } catch (err) {
       console.error('Error posting comment:', err);
       setError('Failed to post comment. Please try again.');
@@ -646,38 +656,72 @@ export default function Comments() {
   // Handle flagging/unflagging a comment
   const handleFlagComment = async (commentId: string, flagType: 'inappropriate' | 'spam' | 'pinned') => {
     if (!user) {
-      setError('Please sign in to flag comments.');
+      showToast.info.signInRequired();
       return;
     }
     setError(null);
     setOpenFlagMenu(null); // Close menu
 
     const currentFlag = userFlags[commentId];
+    const isAdmin = user.user_metadata?.user_type === 'admin';
+    const hasUserFlagged = currentFlag?.userFlags[user.id];
 
     try {
-      if (currentFlag) {
-        // Already flagged, so unflag (delete)
+      if (hasUserFlagged) {
+        // User has already flagged this comment, so unflag it
         console.log(`Unflagging comment ${commentId}`);
         const { error } = await supabase
           .from('flags')
           .delete()
           .match({ user_id: user.id, comment_id: commentId });
-        if (error) throw error;
+        if (error) {
+          console.error('Error unflagging comment:', error);
+          showToast.error.unflag();
+          throw error;
+        }
         // Update local state
         setUserFlags(prev => {
           const newState = { ...prev };
-          delete newState[commentId];
+          if (newState[commentId]) {
+            delete newState[commentId].userFlags[user.id];
+            if (Object.keys(newState[commentId].userFlags).length === 0) {
+              delete newState[commentId];
+            } else {
+              newState[commentId] = {
+                ...newState[commentId],
+                count: newState[commentId].count - 1
+              };
+            }
+          }
           return newState;
         });
+        
+        showToast.success.flagRemoved();
       } else {
-        // Not flagged, so flag (insert)
+        // User hasn't flagged this comment, so add their flag
         console.log(`Flagging comment ${commentId} as ${flagType}`);
         const { error } = await supabase
           .from('flags')
           .insert({ user_id: user.id, comment_id: commentId, flag_type: flagType });
-        if (error) throw error;
+        if (error) {
+          console.error('Error flagging comment:', error);
+          showToast.error.flag();
+          throw error;
+        }
         // Update local state
-        setUserFlags(prev => ({ ...prev, [commentId]: { type: flagType, count: 1 } }));
+        setUserFlags(prev => ({
+          ...prev,
+          [commentId]: {
+            type: flagType,
+            count: (prev[commentId]?.count || 0) + 1,
+            userFlags: {
+              ...(prev[commentId]?.userFlags || {}),
+              [user.id]: true
+            }
+          }
+        }));
+        
+        showToast.success.commentFlagged(flagType);
       }
     } catch (err: any) {
       console.error('Error flagging comment:', err);
@@ -739,10 +783,10 @@ export default function Comments() {
                 <div className="relative flag-dropdown-container">
                   <button
                     onClick={() => setOpenFlagMenu(openFlagMenu === comment.id ? null : comment.id)}
-                    className="p-1.5 rounded-full text-white/50 hover:text-white hover:bg-white/10 transition-colors"
+                    className="flex items-center justify-center w-6 h-6 rounded-full bg-[#2c2c2c] border border-white/20 text-white/50 hover:text-white hover:bg-white/10 transition-colors"
                     title="More actions"
                   >
-                    <MoreVertical className="w-4 h-4" />
+                    <MoreVertical className="w-3.5 h-3.5" />
                   </button>
                   {openFlagMenu === comment.id && (
                     <div className="absolute top-full right-0 mt-1 w-44 bg-[#2c2c2c] border border-white/20 rounded-lg shadow-lg z-50 py-1 overflow-visible">
@@ -791,7 +835,10 @@ export default function Comments() {
                                   .eq('comment_id', comment.id)
                                   .eq('flag_type', 'pinned');
                                 
-                                if (error) throw error;
+                                if (error) {
+                                  showToast.error.unpin();
+                                  throw error;
+                                }
                                 
                                 // Update local state
                                 setUserFlags(prev => {
@@ -799,6 +846,8 @@ export default function Comments() {
                                   delete newFlags[comment.id];
                                   return newFlags;
                                 });
+
+                                showToast.success.commentUnpinned();
                               } else {
                                 // Pin the comment
                                 const { error } = await supabase
@@ -809,13 +858,24 @@ export default function Comments() {
                                     flag_type: 'pinned'
                                   });
                                 
-                                if (error) throw error;
+                                if (error) {
+                                  showToast.error.pin();
+                                  throw error;
+                                }
                                 
                                 // Update local state
                                 setUserFlags(prev => ({
                                   ...prev,
-                                  [comment.id]: { type: 'pinned', count: 1 }
+                                  [comment.id]: { 
+                                    type: 'pinned', 
+                                    count: 1,
+                                    userFlags: {
+                                      [user.id]: true
+                                    }
+                                  }
                                 }));
+
+                                showToast.success.commentPinned();
                               }
                               
                               setOpenFlagMenu(null);
@@ -888,6 +948,7 @@ export default function Comments() {
                                       
                                       if (error) {
                                         console.error('Error removing flags:', error);
+                                        showToast.error.removeAllFlags();
                                         throw error;
                                       }
                                       
@@ -898,6 +959,7 @@ export default function Comments() {
                                         return newFlags;
                                       });
                                       
+                                      showToast.success.allFlagsRemoved();
                                       setOpenFlagMenu(null);
                                     } catch (err) {
                                       console.error('Error removing all flags:', err);
@@ -1008,28 +1070,21 @@ export default function Comments() {
             {/* Bottom Actions */}
             {!isEditing && (
               <div className="flex items-center space-x-4 mt-2">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleVote(comment.id, 'like');
+                <ReactionButton
+                  commentId={comment.id}
+                  reactions={{
+                    like: comment.likes,
+                    dislike: comment.dislikes,
+                    love: comment.love_count,
+                    laugh: comment.laugh_count,
+                    surprise: comment.surprise_count,
+                    sad: comment.sad_count,
+                    mad: comment.mad_count
                   }}
-                  className={`flex items-center gap-1 text-green-500 hover:text-green-400 transition-colors ${
-                    userVotes[comment.id] === 'like' ? 'text-green-400' : ''
-                  }`}
-                >
-                  <ThumbsUp className="w-4 h-4" /> {comment.likes}
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleVote(comment.id, 'dislike');
-                  }}
-                  className={`flex items-center gap-1 text-red-500 hover:text-red-400 transition-colors ${
-                    userVotes[comment.id] === 'dislike' ? 'text-red-400' : ''
-                  }`}
-                >
-                  <ThumbsDown className="w-4 h-4" /> {comment.dislikes}
-                </button>
+                  userReaction={userVotes[comment.id]}
+                  onReaction={handleReaction}
+                />
+                
                 {user && (
                   <button
                     onClick={() => handleReplyClick(comment.id)}
@@ -1040,6 +1095,7 @@ export default function Comments() {
                     Reply
                   </button>
                 )}
+                
                 {hasReplies && (
                   <button
                     onClick={() => toggleReplies(comment.id)}
@@ -1101,24 +1157,15 @@ export default function Comments() {
   };
 
   // Vote on comment
-  const handleVote = async (commentId: string, type: 'like' | 'dislike') => {
+  const handleReaction = async (commentId: string, type: 'like' | 'dislike' | 'love' | 'laugh' | 'surprise' | 'sad' | 'mad') => {
     if (!user) {
-      toast({
-        title: (
-          <div className="flex items-center gap-2">
-            <AlertCircle className="h-4 w-4" />
-            Sign in required
-          </div>
-        ),
-        description: "Please sign in to vote on comments",
-        variant: "destructive",
-      });
+      showToast.info.signInRequired();
       return;
     }
 
     try {
       setError(null);
-      console.log('Attempting to vote:', { commentId, type, userId: user.id });
+      console.log('Attempting to react:', { commentId, type, userId: user.id });
       
       const comment = comments.find(c => c.id === commentId);
       if (!comment) {
@@ -1126,36 +1173,34 @@ export default function Comments() {
         return;
       }
 
-      // Check if user has already voted
-      const currentVote = userVotes[commentId];
-      console.log('Current vote state:', { currentVote, userVotes });
+      // Check if user has already reacted
+      const currentReaction = userVotes[commentId];
+      console.log('Current reaction state:', { currentReaction, userVotes });
 
       // Update local state immediately
       const newComments = [...comments];
       const commentIndex = newComments.findIndex(c => c.id === commentId);
       if (commentIndex !== -1) {
         const comment = newComments[commentIndex];
-        if (currentVote === type) {
-          // Removing vote
-          if (type === 'like') comment.likes = Math.max(0, comment.likes - 1);
-          if (type === 'dislike') comment.dislikes = Math.max(0, comment.dislikes - 1);
-        } else if (currentVote) {
-          // Changing vote
-          if (currentVote === 'like') comment.likes = Math.max(0, comment.likes - 1);
-          if (currentVote === 'dislike') comment.dislikes = Math.max(0, comment.dislikes - 1);
-          if (type === 'like') comment.likes = (comment.likes || 0) + 1;
-          if (type === 'dislike') comment.dislikes = (comment.dislikes || 0) + 1;
-        } else {
-          // New vote
-          if (type === 'like') comment.likes = (comment.likes || 0) + 1;
-          if (type === 'dislike') comment.dislikes = (comment.dislikes || 0) + 1;
+        
+        // Remove previous reaction count
+        if (currentReaction) {
+          const countField = `${currentReaction}_count`;
+          comment[countField] = Math.max(0, comment[countField] - 1);
         }
+        
+        // Add new reaction count if different
+        if (currentReaction !== type) {
+          const countField = `${type}_count`;
+          comment[countField] = (comment[countField] || 0) + 1;
+        }
+        
         setComments(newComments);
       }
 
-      if (currentVote === type) {
-        // If clicking the same vote type, remove the vote
-        console.log('Removing vote');
+      if (currentReaction === type) {
+        // Remove reaction
+        console.log('Removing reaction');
         const { error: deleteError } = await supabase
           .from('votes')
           .delete()
@@ -1163,7 +1208,8 @@ export default function Comments() {
           .eq('comment_id', commentId);
 
         if (deleteError) {
-          console.error('Error deleting vote:', deleteError);
+          console.error('Error deleting reaction:', deleteError);
+          showToast.error.voteRemove();
           throw deleteError;
         }
 
@@ -1171,9 +1217,10 @@ export default function Comments() {
         const newVotes = { ...userVotes };
         delete newVotes[commentId];
         setUserVotes(newVotes);
-      } else if (currentVote) {
-        // If changing vote type, update the vote
-        console.log('Updating vote from', currentVote, 'to', type);
+        showToast.success.voteRemoved();
+      } else if (currentReaction) {
+        // If changing reaction type, update the vote
+        console.log('Updating reaction from', currentReaction, 'to', type);
         const { error: updateError } = await supabase
           .from('votes')
           .update({ vote_type: type })
@@ -1181,15 +1228,17 @@ export default function Comments() {
           .eq('comment_id', commentId);
 
         if (updateError) {
-          console.error('Error updating vote:', updateError);
+          console.error('Error updating reaction:', updateError);
+          showToast.error.voteUpdate();
           throw updateError;
         }
 
         // Update local state
         setUserVotes({ ...userVotes, [commentId]: type });
+        showToast.success.voteUpdated();
       } else {
-        // If no previous vote, create new vote
-        console.log('Creating new vote');
+        // If no previous reaction, create new vote
+        console.log('Creating new reaction');
         const { error: insertError } = await supabase
           .from('votes')
           .insert([
@@ -1201,43 +1250,63 @@ export default function Comments() {
           ]);
 
         if (insertError) {
-          console.error('Error inserting vote:', insertError);
+          console.error('Error inserting reaction:', insertError);
+          showToast.error.voteSubmit();
           throw insertError;
         }
 
         // Update local state
         setUserVotes({ ...userVotes, [commentId]: type });
+        showToast.success.voteSubmitted();
       }
 
-      // Fetch updated vote counts for this comment only
+      // Fetch updated reaction counts for this comment only
       const { data: votesData, error: votesError } = await supabase
         .from('votes')
         .select('*')
         .eq('comment_id', commentId);
 
       if (votesError) {
-        console.error('Error fetching updated votes:', votesError);
+        console.error('Error fetching updated reactions:', votesError);
+        showToast.error.voteUpdate();
         return;
       }
 
-      // Calculate new vote counts
-      const voteCounts = { likes: 0, dislikes: 0 };
+      // Calculate new reaction counts
+      const reactionCounts = {
+        like: 0,
+        dislike: 0,
+        love: 0,
+        laugh: 0,
+        surprise: 0,
+        sad: 0,
+        mad: 0
+      };
+
       votesData.forEach((vote: Vote) => {
-        if (vote.vote_type === 'like') voteCounts.likes++;
-        else voteCounts.dislikes++;
+        reactionCounts[vote.vote_type]++;
       });
 
-      // Update the specific comment's vote counts
+      // Update the specific comment's reaction counts
       setComments(prevComments => 
         prevComments.map(c => 
           c.id === commentId 
-            ? { ...c, likes: voteCounts.likes, dislikes: voteCounts.dislikes }
+            ? { 
+                ...c, 
+                likes: reactionCounts.like,
+                dislikes: reactionCounts.dislike,
+                love_count: reactionCounts.love,
+                laugh_count: reactionCounts.laugh,
+                surprise_count: reactionCounts.surprise,
+                sad_count: reactionCounts.sad,
+                mad_count: reactionCounts.mad
+              }
             : c
         )
       );
     } catch (err) {
-      console.error('Error voting:', err);
-      setError('Failed to vote. Please try again.');
+      console.error('Error handling reaction:', err);
+      setError('Failed to react. Please try again.');
     }
   };
 
@@ -1266,6 +1335,7 @@ export default function Comments() {
 
         if (uploadError) {
           console.error('Upload error:', uploadError);
+          showToast.error.avatarUpload();
           throw new Error('Failed to upload avatar. Please try again.');
         }
 
@@ -1291,6 +1361,7 @@ export default function Comments() {
 
       if (updateError) {
         console.error('Update error:', updateError);
+        showToast.error.profileUpdate();
         throw new Error('Failed to update profile. Please try again.');
       }
 
@@ -1304,6 +1375,8 @@ export default function Comments() {
         ...user,
         user_metadata: updatedMetadata
       });
+
+      showToast.success.profileUpdate();
 
       setShowSettings(false);
       setNewDisplayName('');
@@ -1347,7 +1420,7 @@ export default function Comments() {
   // Handle Password Reset
   const handlePasswordReset = async () => {
     if (!email) {
-      setResetMessage('Please enter your email address first.');
+      showToast.error.emailRequired();
       return;
     }
     setIsResettingPassword(true);
@@ -1358,8 +1431,11 @@ export default function Comments() {
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: `${window.location.origin}/update-password`, // Redirect URL after clicking link
       });
-      if (resetError) throw resetError;
-      setResetMessage('Password reset email sent! Check your inbox (and spam folder).');
+      if (resetError) {
+        showToast.error.resetFailed();
+        throw resetError;
+      }
+      showToast.success.resetSent();
     } catch (err: any) {
       console.error('Error sending password reset email:', err);
       setResetMessage(err.message || 'Failed to send password reset email.');
@@ -1392,7 +1468,10 @@ export default function Comments() {
         .update({ content: editingContent, updated_at: new Date().toISOString() })
         .eq('id', editingCommentId);
 
-      if (error) throw error;
+      if (error) {
+        showToast.error.commentEdit();
+        throw error;
+      }
 
       // Update local state
       setComments(prevComments =>
@@ -1400,6 +1479,9 @@ export default function Comments() {
           c.id === editingCommentId ? { ...c, content: editingContent, updated_at: new Date().toISOString() } : c
         )
       );
+      
+      showToast.success.commentEdited();
+      
       handleCancelEdit(); // Close edit form
     } catch (err: any) {
       console.error('Error updating comment:', err);
@@ -1434,6 +1516,7 @@ export default function Comments() {
 
       if (deleteError) {
         console.error('Error deleting comment:', deleteError);
+        showToast.error.commentDelete();
         throw new Error('Failed to delete comment. Please try again.');
       }
 
@@ -1456,17 +1539,7 @@ export default function Comments() {
         return prevComments.filter(c => !commentIdsToDelete.has(c.id));
       });
 
-      // Show success toast
-      toast({
-        title: (
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4" />
-            Comment deleted
-          </div>
-        ),
-        description: "Your comment has been deleted successfully",
-        variant: "success",
-      });
+      showToast.success.commentDeleted();
 
       handleCancelDelete(); // Close modal
     } catch (err: any) {
@@ -1499,6 +1572,7 @@ export default function Comments() {
 
       if (!response.ok) {
         const error = await response.json();
+        showToast.error.accountDelete();
         throw new Error(error.error || 'Failed to delete account');
       }
 
@@ -1558,6 +1632,55 @@ export default function Comments() {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [showUserMenu]);
+
+  // Add connection status monitoring
+  useEffect(() => {
+    const handleOnline = () => {
+      showToast.success.connectionRestored();
+    };
+
+    const handleOffline = () => {
+      showToast.error.connectionLost();
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Add session monitoring
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error) {
+        showToast.info.sessionExpired();
+        setUser(null);
+      }
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        showToast.info.autoSignOut();
+      }
+    });
+
+    // Check session every 5 minutes
+    const interval = setInterval(checkSession, 5 * 60 * 1000);
+
+    return () => {
+      subscription.unsubscribe();
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Add refresh notification for certain actions
+  const notifyRefreshRequired = () => {
+    showToast.info.refreshRequired();
+  };
 
   return (
     <div className="max-w-5xl mx-auto px-2 sm:px-6">
@@ -1985,145 +2108,148 @@ export default function Comments() {
 
       {/* Settings Modal */}
       {showSettings && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-white/10 backdrop-blur-xl rounded-lg p-6 max-w-md w-full mx-4 shadow-lg">
-            {/* Modal Header */}
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold">Profile Settings</h3>
-              <button
-                onClick={() => {
-                  console.log("[DEBUG] Close button clicked in Settings Modal")
-                  setShowSettings(false)
-                }}
-                className="text-white/60 hover:text-white transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            {/* Modal Form Content (Restored) */}
-            <form onSubmit={handleProfileUpdate} className="space-y-4">
-              {/* Account Type Indicator */}
-              <div className="flex items-center gap-2 mb-2">
-                {user?.user_metadata?.user_type === 'admin' ? (
-                  <div className="flex items-center gap-2 text-yellow-400">
-                    <Star className="w-4 h-4" />
-                    <span className="text-sm font-medium">Admin Account</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 text-white/60">
-                    <User className="w-4 h-4" />
-                    <span className="text-sm font-medium">User Account</span>
-                  </div>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1 text-white/80">Display Name</label>
-                <input
-                  type="text"
-                  value={newDisplayName}
-                  onChange={(e) => setNewDisplayName(e.target.value)}
-                  placeholder={user?.user_metadata?.display_name || 'Enter display name'}
-                  className="w-full p-3 border border-white/10 rounded-lg bg-white/5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1 text-white/80">Avatar</label>
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-full overflow-hidden bg-white/10">
-                    {avatarUrl ? (
-                      <img src={avatarUrl} alt="Avatar preview" className="w-full h-full object-cover" />
-                    ) : user?.user_metadata?.avatar_url ? (
-                      <img src={user.user_metadata.avatar_url} alt="Current avatar" className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-white/60 text-xs">
-                        No avatar
-                      </div>
-                    )}
-                  </div>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleAvatarChange}
-                    className="hidden"
-                    id="avatar-upload"
-                  />
-                  <label
-                    htmlFor="avatar-upload"
-                    className="px-4 py-2 bg-white/10 rounded-lg text-white/60 hover:text-white transition-colors cursor-pointer text-sm"
-                  >
-                    {avatarFile ? 'Change Avatar' : 'Upload Avatar'}
-                  </label>
-                </div>
-              </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowSettings(false)}
-                  className="px-4 py-2 text-white/70 hover:text-white transition-colors rounded-lg"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isUpdatingProfile}
-                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                >
-                  {isUpdatingProfile ? 'Saving...' : 'Save'}
-                </button>
-              </div>
-            </form>
+        <ProfileSettingsModal
+          user={user}
+          onClose={() => setShowSettings(false)}
+          onSignOut={handleSignOut}
+          onProfileUpdate={async (newDisplayName, newEmail, avatarFile) => {
+            setIsUpdatingProfile(true);
+            try {
+              setError(null);
+              
+              // Upload avatar if selected
+              let avatarPath = null;
+              if (avatarFile) {
+                const fileExt = avatarFile.name.split('.').pop();
+                const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+                
+                // Upload the file
+                const { error: uploadError, data } = await supabase.storage
+                  .from('avatars')
+                  .upload(fileName, avatarFile, {
+                    cacheControl: '3600',
+                    upsert: true
+                  });
 
-            {/* Danger Zone */}
-            <div className="mt-8 pt-6 border-t border-white/10">
-              <h4 className="text-lg font-semibold text-red-400 mb-4">Danger Zone</h4>
-              <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
-                <h5 className="text-red-400 font-medium mb-2">Delete Account</h5>
-                <p className="text-white/60 text-sm mb-4">
-                  This action cannot be undone. This will permanently delete your account and remove all of your comments and replies. Any replies to your comments will also be deleted.
-                </p>
-                <button
-                  onClick={() => setShowDeleteAccountModal(true)}
-                  className="px-4 py-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition-colors"
-                >
-                  Delete Account
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+                if (uploadError) {
+                  console.error('Upload error:', uploadError);
+                  showToast.error.avatarUpload();
+                  throw new Error('Failed to upload avatar. Please try again.');
+                }
+
+                // Get the public URL
+                const { data: { publicUrl } } = supabase.storage
+                  .from('avatars')
+                  .getPublicUrl(fileName);
+
+                avatarPath = publicUrl;
+              }
+
+              // Update profile
+              const { error: updateError } = await supabase
+                .from('profiles')
+                .update({
+                  user_metadata: {
+                    ...user.user_metadata,
+                    display_name: newDisplayName || user.user_metadata?.display_name,
+                    avatar_url: avatarPath || user.user_metadata?.avatar_url,
+                    toast_settings: {
+                      commentToasts: true,
+                      profileToasts: true,
+                      systemToasts: true
+                    }
+                  }
+                })
+                .eq('id', user.id);
+
+              if (updateError) {
+                console.error('Update error:', updateError);
+                showToast.error.profileUpdate();
+                throw new Error('Failed to update profile. Please try again.');
+              }
+
+              // Update email if changed
+              if (newEmail !== user.email) {
+                const { error: emailError } = await supabase.auth.updateUser({
+                  email: newEmail
+                });
+
+                if (emailError) {
+                  console.error('Email update error:', emailError);
+                  showToast.error.profileUpdate();
+                  throw new Error('Failed to update email. Please try again.');
+                }
+              }
+
+              // Update local user state
+              const updatedMetadata = {
+                ...user.user_metadata,
+                display_name: newDisplayName || user.user_metadata?.display_name,
+                avatar_url: avatarPath || user.user_metadata?.avatar_url,
+                toast_settings: {
+                  commentToasts: true,
+                  profileToasts: true,
+                  systemToasts: true
+                }
+              };
+              setUser({
+                ...user,
+                email: newEmail,
+                user_metadata: updatedMetadata
+              });
+
+              showToast.success.profileUpdate();
+            } catch (err) {
+              console.error('Error updating profile:', err);
+              throw err;
+            } finally {
+              setIsUpdatingProfile(false);
+            }
+          }}
+          onDeleteAccount={async (confirmation) => {
+            if (!user || confirmation !== 'DELETE') return;
+            
+            setIsDeletingAccount(true);
+            setError(null);
+            
+            try {
+              // Call the Edge Function to handle account deletion
+              const { data: { session } } = await supabase.auth.getSession();
+              if (!session) throw new Error('No active session');
+
+              const response = await fetch(`${supabaseUrl}/functions/v1/delete-account`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${session.access_token}`,
+                  'Content-Type': 'application/json',
+                },
+              });
+
+              if (!response.ok) {
+                const error = await response.json();
+                showToast.error.accountDelete();
+                throw new Error(error.error || 'Failed to delete account');
+              }
+
+              showToast.success.accountDeleted();
+              setUser(null);
+            } catch (err) {
+              console.error('Error deleting account:', err);
+              throw err;
+            } finally {
+              setIsDeletingAccount(false);
+            }
+          }}
+        />
       )}
 
       {/* Delete Confirmation Modal */}
       {showDeleteConfirmModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white/10 backdrop-blur-xl rounded-lg p-6 max-w-md w-full mx-4 shadow-lg">
-            <div className="flex items-center gap-3 mb-4">
-              <AlertTriangle className="w-6 h-6 text-red-400 flex-shrink-0" />
-              <h3 className="text-xl font-semibold text-white">Delete Comment?</h3>
-            </div>
-            <p className="text-white/70 mb-6">Are you sure you want to permanently delete this comment and all its replies? This action cannot be undone.</p>
-            <div className="flex justify-end gap-3">
-              {/* Keep distinct button colors but maybe match padding/shape */}
-              <button
-                onClick={handleCancelDelete}
-                className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white/80 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmDelete}
-                disabled={isDeletingComment}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
-              >
-                {isDeletingComment ? (
-                  <>Deleting...</>
-                ) : (
-                  <><Trash2 className="w-4 h-4"/>Delete</>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
+        <DeleteCommentModal
+          isDeleting={isDeletingComment}
+          onConfirm={handleConfirmDelete}
+          onCancel={handleCancelDelete}
+        />
       )}
 
       {/* Delete Account Confirmation Modal */}
