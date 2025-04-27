@@ -676,7 +676,7 @@ export default function Comments() {
 
         {/* Comment Column */}
         <div className="flex-grow space-y-4">
-          <div className="border border-white/10 rounded-lg p-4 bg-white/5 relative group">
+          <div className={`border ${userFlags[comment.id]?.type === 'pinned' ? 'border-yellow-400/20 bg-yellow-400/5' : 'border-white/10 bg-white/5'} rounded-lg p-4 relative group`}>
             {/* Top Right Actions */}
             <div className="absolute top-1 right-1 flex items-center gap-1">
               {isFlagged && (
