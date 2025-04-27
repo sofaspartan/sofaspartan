@@ -5,6 +5,8 @@ import { showToast } from "./ToastNotifications";
 import ProfileSettingsModal from './ProfileSettingsModal';
 import DeleteCommentModal from './DeleteCommentModal';
 import ReactionButton from './ReactionButton';
+import AuthModals from './AuthModals';
+import UserAvatarButton from './UserAvatarButton';
 
 // Types
 interface Comment {
@@ -94,7 +96,7 @@ export default function Comments() {
   const [showSortDropdown, setShowSortDropdown] = useState(false);
   const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
-  const [showAuthForm, setShowAuthForm] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [visibleCommentCount, setVisibleCommentCount] = useState(3);
   const [userFlags, setUserFlags] = useState<Record<string, { type: 'inappropriate' | 'spam' | 'pinned', count: number, userFlags: Record<string, boolean> }>>({});
   const [openFlagMenu, setOpenFlagMenu] = useState<string | null>(null);
@@ -207,7 +209,7 @@ export default function Comments() {
       } else {
         console.log('Clearing user from auth state change');
         setUser(null);
-        setShowAuthForm(false); // Close sign in/up forms on sign out
+        setShowAuthModal(false); // Close sign in/up forms on sign out
         setShowSignUp(false);   // Reset to sign in mode
       }
     });
@@ -219,92 +221,6 @@ export default function Comments() {
       subscription.unsubscribe();
     };
   }, []);
-
-  // Handle sign in
-  const handleSignIn = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setResetMessage(null); // Clear reset message on sign-in attempt
-      setError(null);
-      
-      console.log('Signing in...');
-      
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      });
-
-      if (error) {
-        console.error('Sign in error:', error);
-        if (error.message.includes('Email not confirmed')) {
-          showToast.info.emailNotConfirmed();
-        } else {
-          showToast.error.signIn();
-        }
-        throw error;
-      }
-
-      console.log('Sign in successful:', data);
-
-      // Fetch user's profile data
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('user_metadata')
-        .eq('id', data.user.id)
-        .single();
-
-      if (profileError) {
-        console.error('Error fetching profile:', profileError);
-      }
-
-      const displayName = profileData?.user_metadata?.display_name;
-      const emailName = data.user?.email?.split('@')[0];
-      const userName = displayName || emailName || 'User';
-      
-      showToast.success.signIn();
-      setEmail('');
-      setPassword('');
-  };
-
-  // Handle sign up
-  const handleSignUp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setResetMessage(null); // Clear reset message on sign-up attempt
-      setError(null);
-      
-      console.log('Signing up...');
-      
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-          data: {
-            display_name: displayName,
-          email_confirmed: false,
-          user_type: 'regular' // Set default user_type
-          }
-        }
-      });
-
-      if (error) {
-        console.error('Sign up error:', error);
-        showToast.error.signUp();
-        return;
-      }
-
-      console.log('Sign up successful:', data);
-      showToast.success.signUp();
-      
-      if (data.user?.identities?.length === 0) {
-        setError('This email is already registered. Please sign in instead.');
-      } else {
-        setError('Please check your email for the confirmation link. If you don\'t see it, check your spam folder.');
-      }
-      
-      setEmail('');
-      setPassword('');
-      setDisplayName('');
-  };
 
   // Handle sign out
   const handleSignOut = async () => {
@@ -1704,78 +1620,11 @@ export default function Comments() {
                 </div>
                 {/* Three Dot Menu - All Screen Sizes */}
                 {user && (
-                  <div className="relative user-menu-container">
-                    <button
-                      onClick={() => setShowUserMenu(!showUserMenu)}
-                      className="pl-3 pr-1.5 py-1.5 rounded-full text-white/60 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-1 border border-white/10"
-                    >
-                      {user.user_metadata?.avatar_url ? (
-                        <img 
-                          src={user.user_metadata.avatar_url} 
-                          alt={`${user.user_metadata?.display_name || user.email}'s avatar`} 
-                          className="w-8 h-8 rounded-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white/60 text-sm">
-                          {(user.user_metadata?.display_name || user.email).charAt(0).toUpperCase()}
-                        </div>
-                      )}
-                      <MoreVertical className="w-4 h-4" />
-                    </button>
-                    {showUserMenu && (
-                      <div className="absolute top-full right-0 mt-1 w-48 bg-[#2c2c2c] border border-white/20 rounded-lg shadow-lg z-20 py-1">
-                        <div className="px-3 py-3 text-sm text-white/60 border-b border-white/10 flex flex-col items-center gap-2">
-                          <div className="w-12 h-12 rounded-full overflow-hidden bg-white/10">
-                            {user.user_metadata?.avatar_url ? (
-                              <img 
-                                src={user.user_metadata.avatar_url} 
-                                alt={`${user.user_metadata?.display_name || user.email}'s avatar`} 
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-white/60 text-lg">
-                                {(user.user_metadata?.display_name || user.email).charAt(0).toUpperCase()}
-                              </div>
-                            )}
-                          </div>
-                          <span className="text-center font-medium text-base text-white/90">{user.user_metadata?.display_name || user.email}</span>
-                          <div className="flex items-center gap-1.5 text-xs">
-                            {user.user_metadata?.user_type === 'admin' ? (
-                              <>
-                                <Star className="w-3.5 h-3.5 text-yellow-400" />
-                                <span className="text-yellow-400">Admin</span>
-                              </>
-                            ) : (
-                              <>
-                                <User className="w-3.5 h-3.5 text-white/60" />
-                                <span className="text-white/60">User</span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => {
-                            openSettingsModal();
-                            setShowUserMenu(false);
-                          }}
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-white/10 flex items-center gap-2"
-                        >
-                          <Settings className="w-4 h-4" />
-                          Settings
-                        </button>
-                        <button
-                          onClick={() => {
-                            handleSignOut();
-                            setShowUserMenu(false);
-                          }}
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-white/10 flex items-center gap-2"
-                        >
-                          <LogOut className="w-4 h-4" />
-                          Sign Out
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                  <UserAvatarButton
+                    user={user}
+                    onSignOut={handleSignOut}
+                    onOpenSettings={openSettingsModal}
+                  />
                 )}
               </div>
             </div>
@@ -1784,137 +1633,15 @@ export default function Comments() {
           {/* Collapsible Content Area */} 
           {!isCommentsCollapsed && (
             <>
-              {/* Auth Forms */}
-              {!user && showAuthForm && (
-                <div className="mb-8 border border-white/10 rounded-lg bg-white/5 p-6 relative">
-                  <button
-                    onClick={() => setShowAuthForm(false)}
-                    className="absolute top-4 right-4 text-white/60 hover:text-white transition-colors"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                  <h3 className="text-xl font-bold mb-6">{showSignUp ? 'Sign Up' : 'Sign In'}</h3>
-                  <form onSubmit={showSignUp ? handleSignUp : handleSignIn}>
-                    <div className="space-y-4">
-                      {showSignUp && (
-                        <div>
-                          <input
-                            type="text"
-                            value={displayName}
-                            onChange={(e) => setDisplayName(e.target.value)}
-                            placeholder="Display Name"
-                            className="w-full p-3 border border-white/10 rounded-lg bg-white/5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50"
-                            required={showSignUp}
-                          />
-                        </div>
-                      )}
-                      <div>
-                        <label htmlFor="email-input" className="sr-only">Email</label>
-                        <input
-                          id="email-input"
-                          type="email"
-                          value={email}
-                          onChange={(e) => {
-                            setEmail(e.target.value);
-                            setResetMessage(null);
-                            setError(null);
-                          }}
-                          placeholder="Email"
-                          className="w-full p-3 border border-white/10 rounded-lg bg-white/5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50"
-                          required
-                          autoComplete="email"
-                        />
-                      </div>
-                      <div>
-                        <label htmlFor="password-input" className="sr-only">Password</label>
-                        <input
-                          id="password-input"
-                          type="password"
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          placeholder="Password"
-                          className="w-full p-3 border border-white/10 rounded-lg bg-white/5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50"
-                          required={!isResettingPassword && !showSignUp}
-                          autoComplete={showSignUp ? "new-password" : "current-password"}
-                        />
-                      </div>
-
-                      {/* Forgot Password Link */}
-                      {!showSignUp && (
-                        <div className="text-right">
-                          <button
-                            type="button"
-                            onClick={handlePasswordReset}
-                            disabled={isResettingPassword}
-                            className="text-sm text-white hover:text-white/80 disabled:opacity-50 transition-colors underline"
-                          >
-                            {isResettingPassword ? 'Sending...' : 'Forgot Password?'}
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Display Reset Message */}
-                      {resetMessage && (
-                        <div className={`text-sm p-3 rounded-lg ${resetMessage.includes('sent') ? 'bg-green-500/10 text-green-300 border border-green-500/20' : 'bg-red-500/10 text-red-300 border border-red-500/20'}`}>
-                          {resetMessage}
-                        </div>
-                      )}
-
-                      <button
-                        type="submit"
-                        disabled={isSigningIn || isSigningUp || (isResettingPassword && !showSignUp)}
-                        className="w-full bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
-                      >
-                        {isSigningIn ? 'Signing in...' : isSigningUp ? 'Signing up...' : showSignUp ? 'Sign Up' : 'Sign In'}
-                      </button>
-
-                      {/* Switch Form Link */}
-                      <div className="text-center text-sm text-white/60">
-                        {showSignUp ? (
-                          <span>
-                            Already have an account?{' '}
-                            <button
-                              type="button"
-                              onClick={() => setShowSignUp(false)}
-                              className="text-white hover:text-white/80 transition-colors underline"
-                            >
-                              Sign In
-                            </button>
-                          </span>
-                        ) : (
-                          <span>
-                            Don't have an account?{' '}
-                            <button
-                              type="button"
-                              onClick={() => setShowSignUp(true)}
-                              className="text-white hover:text-white/80 transition-colors underline"
-                            >
-                              Sign Up
-                            </button>
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    {/* Display general errors */}
-                    {error && !resetMessage && (
-                      <div className="mt-4 text-sm p-3 rounded-lg bg-red-500/10 text-red-300 border border-red-500/20">
-                        {error}
-                      </div>
-                    )}
-                  </form>
-                </div>
-              )}
-          
               {/* Sign In Prompt */}
-              {!user && !showAuthForm && (
+              {!user && (
                 <div className="mb-8 p-4 border border-white/10 rounded-lg bg-white/5 flex flex-col sm:flex-row items-center justify-between gap-4">
                   <span className="text-white/60">Sign in or sign up to post comments</span>
                   <div className="flex items-center gap-3">
                     <button
                       onClick={() => { 
                         if (isCommentsCollapsed) setIsCommentsCollapsed(false);
-                        setShowSignUp(false); 
-                        setShowAuthForm(true); 
+                        setShowAuthModal(true);
                       }}
                       className="text-sm text-white/60 hover:text-white transition-colors flex items-center gap-1 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-md whitespace-nowrap"
                     >
@@ -1924,8 +1651,7 @@ export default function Comments() {
                     <button
                       onClick={() => { 
                         if (isCommentsCollapsed) setIsCommentsCollapsed(false);
-                        setShowSignUp(true); 
-                        setShowAuthForm(true); 
+                        setShowAuthModal(true);
                       }}
                       className="text-sm text-white/60 hover:text-white transition-colors flex items-center gap-1 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-md whitespace-nowrap"
                     >
@@ -2105,6 +1831,16 @@ export default function Comments() {
           )}
         </div>
       </div>
+
+      {/* Auth Modal */}
+      <AuthModals
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onAuthSuccess={() => {
+          setShowAuthModal(false);
+          // Any additional success handling can go here
+        }}
+      />
 
       {/* Settings Modal */}
       {showSettings && (
