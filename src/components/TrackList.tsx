@@ -142,7 +142,7 @@ export const TrackList = ({ tracks, onTrackSelect, currentTrack, isPlaying, audi
   // Handle track reaction
   const handleTrackReaction = async (trackId: number, type: ReactionType) => {
     if (!user) {
-      showToast.info.signInRequired();
+      showToast.info.trackReactionSignInRequired();
       return;
     }
 

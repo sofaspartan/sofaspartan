@@ -467,6 +467,16 @@ export const showToast = {
       description: "Please sign in to perform this action.",
       variant: "destructive",
     }),
+    trackReactionSignInRequired: () => toast({
+      title: (
+        <div className="flex items-center gap-2">
+          <AlertCircle className="h-4 w-4" />
+          Sign in required
+        </div>
+      ),
+      description: "You must log in in the comments section to add reactions to tracks",
+      variant: "destructive",
+    }),
     emailNotConfirmed: () => toast({
       title: (
         <div className="flex items-center gap-2">
