@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { ChevronDown, ChevronUp, Reply, Settings, X, LogOut, SortAsc, SortDesc, ThumbsUp, ThumbsDown, LogIn, UserPlus, Mail, Flag, Edit, Trash2, Save, AlertTriangle, Star, User, MoreVertical, Filter, Pin, MessageSquare } from 'lucide-react';
+import { ChevronDown, ChevronUp, Reply, Settings, X, LogOut, SortAsc, SortDesc, ThumbsUp, ThumbsDown, LogIn, UserPlus, Mail, Flag, Edit, Trash2, Save, AlertTriangle, Star, User, MoreVertical, Filter, Pin, MessageSquare, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { toast } from "@/components/ui/use-toast";
 
 // Types
 interface Comment {
@@ -197,6 +198,8 @@ export default function Comments() {
       } else {
         console.log('Clearing user from auth state change');
         setUser(null);
+        setShowAuthForm(false); // Close sign in/up forms on sign out
+        setShowSignUp(false);   // Reset to sign in mode
       }
     });
 
@@ -232,6 +235,32 @@ export default function Comments() {
       }
 
       console.log('Sign in successful:', data);
+
+      // Fetch user's profile data
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('user_metadata')
+        .eq('id', data.user.id)
+        .single();
+
+      if (profileError) {
+        console.error('Error fetching profile:', profileError);
+      }
+
+      const displayName = profileData?.user_metadata?.display_name;
+      const emailName = data.user?.email?.split('@')[0];
+      const userName = displayName || emailName || 'User';
+      
+      toast({
+        title: (
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4" />
+            Welcome back, {userName}!
+          </div>
+        ),
+        description: "You have successfully signed in",
+        variant: "success",
+      });
       setEmail('');
       setPassword('');
   };
@@ -290,6 +319,16 @@ export default function Comments() {
       }
       
       console.log('Sign out successful');
+      toast({
+        title: (
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4" />
+            Signed out
+          </div>
+        ),
+        description: "You have successfully signed out",
+        variant: "success",
+      });
       setUser(null);
     } catch (err) {
       console.error('Error signing out:', err);
@@ -522,6 +561,18 @@ export default function Comments() {
       setComments([newCommentWithUser, ...comments]);
       setNewComment('');
       setReplyingTo(null);
+
+      // Show success toast
+      toast({
+        title: (
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4" />
+            {replyingTo ? 'Reply posted' : 'Comment posted'}
+          </div>
+        ),
+        description: replyingTo ? 'Your reply has been posted successfully' : 'Your comment has been posted successfully',
+        variant: "success",
+      });
     } catch (err) {
       console.error('Error posting comment:', err);
       setError('Failed to post comment. Please try again.');
@@ -721,8 +772,8 @@ export default function Comments() {
                           Delete
                         </button>
                       )}
-                      {/* Divider after delete */}
-                      {(isOwner || isAdmin) && !isEditing && (
+                      {/* Add divider before pin options - only for admin users */}
+                      {isAdmin && (
                         <div className="h-px bg-white/10 mx-2 my-1"></div>
                       )}
                       {/* Admin-only: Pin/Unpin Comment */}
@@ -779,8 +830,8 @@ export default function Comments() {
                           {userFlags[comment.id]?.type === 'pinned' ? 'Unpin Comment' : 'Pin Comment'}
                         </button>
                       )}
-                      {/* Add divider before flag options */}
-                      {(!isOwner || isAdmin) && (
+                      {/* Add divider before flag options - only for admin users */}
+                      {isAdmin && (
                         <div className="h-px bg-white/10 mx-2 my-1"></div>
                       )}
                       {/* Flag Options (show for non-owners or admins) */}
@@ -808,7 +859,10 @@ export default function Comments() {
                           </button>
                           {isFlagged && userFlags[comment.id]?.type !== 'pinned' && (
                             <>
-                              <div className="h-px bg-white/10 mx-2 my-1"></div>
+                              {/* Add divider before unflag options - only for admin users */}
+                              {isAdmin && (
+                                <div className="h-px bg-white/10 mx-2 my-1"></div>
+                              )}
                               {(!isOwner || isAdmin) && (
                                 <button
                                   onClick={() => {
@@ -1049,7 +1103,16 @@ export default function Comments() {
   // Vote on comment
   const handleVote = async (commentId: string, type: 'like' | 'dislike') => {
     if (!user) {
-      setError('Please sign in to vote');
+      toast({
+        title: (
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4" />
+            Sign in required
+          </div>
+        ),
+        description: "Please sign in to vote on comments",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -1393,6 +1456,18 @@ export default function Comments() {
         return prevComments.filter(c => !commentIdsToDelete.has(c.id));
       });
 
+      // Show success toast
+      toast({
+        title: (
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4" />
+            Comment deleted
+          </div>
+        ),
+        description: "Your comment has been deleted successfully",
+        variant: "success",
+      });
+
       handleCancelDelete(); // Close modal
     } catch (err: any) {
       console.error('Error deleting comment:', err);
@@ -1500,10 +1575,9 @@ export default function Comments() {
                   >
                     {isCommentsCollapsed ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}
                   </button>
-                  <h2 className="text-lg md:text-xl font-semibold">Comments</h2>
-                  {isCommentsCollapsed && (
-                    <span className="text-sm text-white/60 ml-2">Expand to see comments</span>
-                  )}
+                  <h2 className="text-lg md:text-xl font-semibold flex items-center gap-2">
+                    {comments.filter(comment => !comment.parent_id).length} Comments
+                  </h2>
                 </div>
                 {/* Three Dot Menu - All Screen Sizes */}
                 {user && (

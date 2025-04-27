@@ -6,9 +6,9 @@ import type {
 } from "@/components/ui/toast"
 
 const TOAST_LIMIT = 1
-const TOAST_REMOVE_DELAY = 1000000
+const TOAST_REMOVE_DELAY = 2000
 
-type ToasterToast = ToastProps & {
+type ToasterToast = Omit<ToastProps, "id"> & {
   id: string
   title?: React.ReactNode
   description?: React.ReactNode
@@ -149,6 +149,14 @@ function toast({ ...props }: Toast) {
     })
   const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id })
 
+  // Dismiss any existing toasts before adding a new one
+  dispatch({ type: "DISMISS_TOAST" })
+
+  // Set up automatic dismissal
+  const timeout = setTimeout(() => {
+    dismiss()
+  }, TOAST_REMOVE_DELAY)
+
   dispatch({
     type: "ADD_TOAST",
     toast: {
@@ -156,7 +164,10 @@ function toast({ ...props }: Toast) {
       id,
       open: true,
       onOpenChange: (open) => {
-        if (!open) dismiss()
+        if (!open) {
+          clearTimeout(timeout)
+          dismiss()
+        }
       },
     },
   })
