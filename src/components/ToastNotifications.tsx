@@ -464,7 +464,7 @@ export const showToast = {
           Sign in required
         </div>
       ),
-      description: "Please sign in to perform this action.",
+      description: "You must sign in via comments section to add reactions to tracks and comments",
       variant: "destructive",
     }),
     trackReactionSignInRequired: () => toast({

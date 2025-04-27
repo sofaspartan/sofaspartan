@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Smile } from 'lucide-react';
 import ReactionPicker, { ReactionType, REACTIONS } from './ReactionPicker';
+import { showToast } from './ToastNotifications';
 
 interface ReactionCounts {
   like: number;
@@ -17,13 +18,15 @@ interface ReactionButtonProps {
   reactions: ReactionCounts;
   userReaction?: ReactionType;
   onReaction: (commentId: string, type: ReactionType) => void;
+  user?: any;
 }
 
 const ReactionButton: React.FC<ReactionButtonProps> = ({
   commentId,
   reactions,
   userReaction,
-  onReaction
+  onReaction,
+  user
 }) => {
   const [showPicker, setShowPicker] = useState(false);
   const buttonRef = useRef<HTMLDivElement>(null);
@@ -34,6 +37,14 @@ const ReactionButton: React.FC<ReactionButtonProps> = ({
     setTimeout(() => {
       setShowPicker(false);
     }, 100);
+  };
+
+  const handleClick = () => {
+    if (!user) {
+      showToast.info.signInRequired();
+      return;
+    }
+    setShowPicker(!showPicker);
   };
 
   const totalReactions = Object.values(reactions).reduce((sum, count) => sum + count, 0);
@@ -48,7 +59,7 @@ const ReactionButton: React.FC<ReactionButtonProps> = ({
   return (
     <div className="relative" ref={buttonRef}>
       <button
-        onClick={() => setShowPicker(!showPicker)}
+        onClick={handleClick}
         className="flex items-center gap-1 text-gray-400 hover:text-white transition-colors"
       >
         <div className="flex -space-x-2">

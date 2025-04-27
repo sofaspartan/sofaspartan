@@ -999,6 +999,7 @@ export default function Comments() {
                   }}
                   userReaction={userVotes[comment.id]}
                   onReaction={handleReaction}
+                  user={user}
                 />
                 
                 {user && (
