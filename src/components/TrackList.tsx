@@ -11,6 +11,25 @@ import { ReactionType } from './ReactionPicker';
 import { showToast } from './ToastNotifications';
 import ShareButton from './ShareButton';
 
+// Skeleton loading component for tracks
+const TrackSkeleton = () => (
+  <div className="flex items-center gap-3 md:gap-4 p-3 md:p-4 animate-pulse">
+    <div className="text-muted-foreground text-base md:text-base w-6 flex-shrink-0">
+      <div className="h-4 w-4 bg-white/10 rounded"></div>
+    </div>
+    <div className="relative aspect-square w-10 h-10 md:w-16 md:h-16 rounded-sm md:rounded-lg overflow-hidden flex-shrink-0 bg-white/10"></div>
+    <div className="min-w-0 flex-grow">
+      <div className="flex items-center gap-2">
+        <div className="h-4 w-32 bg-white/10 rounded"></div>
+      </div>
+      <div className="h-3 w-24 bg-white/10 rounded mt-1"></div>
+    </div>
+    <div className="flex items-center gap-2">
+      <div className="h-8 w-8 md:h-10 md:w-10 rounded-full bg-white/10"></div>
+    </div>
+  </div>
+);
+
 interface Track {
   id: number;
   title: string;
@@ -56,9 +75,29 @@ export const TrackList = ({ tracks, onTrackSelect, currentTrack, isPlaying, audi
     mad: number;
   }>>({});
   const [userReactions, setUserReactions] = useState<Record<number, ReactionType>>({});
+  const [visibleTracks, setVisibleTracks] = useState<Track[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const listRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const animationFrameRef = useRef<number>();
+
+  // Progressive loading of tracks
+  useEffect(() => {
+    if (tracks.length === 0) return;
+
+    setIsLoading(true);
+    setVisibleTracks([]);
+
+    const loadTracksProgressively = async () => {
+      for (let i = 0; i < tracks.length; i++) {
+        await new Promise(resolve => setTimeout(resolve, 100)); // Small delay between each track
+        setVisibleTracks(prev => [...prev, tracks[i]]);
+      }
+      setIsLoading(false);
+    };
+
+    loadTracksProgressively();
+  }, [tracks]);
 
   // Check user authentication
   useEffect(() => {
@@ -406,14 +445,91 @@ export const TrackList = ({ tracks, onTrackSelect, currentTrack, isPlaying, audi
                   ref={listRef}
                   className="h-[280px] md:h-[400px] overflow-y-auto pr-2 md:pr-4"
                 >
-                  {tracks.map((track) => {
-                    const isCurrentTrack = currentTrack?.id === track.id;
-                    return (
+                  {isLoading ? (
+                    // Show skeleton loading for remaining tracks
+                    <>
+                      {visibleTracks.map((track) => (
+                        <div
+                          key={track.id}
+                          data-track-id={track.id}
+                          className={`flex items-center gap-3 md:gap-4 p-3 md:p-4 hover:bg-white/10 transition-all duration-200 cursor-pointer group rounded-lg ${
+                            currentTrack?.id === track.id ? 'bg-primary/10' : ''
+                          }`}
+                          onClick={() => onTrackSelect(track)}
+                        >
+                          <div className="text-muted-foreground text-base md:text-base w-6 flex-shrink-0 group-hover:text-white transition-colors">
+                            {track.id}
+                          </div>
+                          <div className="relative aspect-square w-10 h-10 md:w-16 md:h-16 rounded-sm md:rounded-lg overflow-hidden flex-shrink-0 group-hover:scale-105 transition-transform duration-200">
+                            <img 
+                              src={track.albumArt} 
+                              alt={`${track.title} album art`}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                          <div className="min-w-0 flex-grow">
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-medium truncate text-base md:text-base group-hover:text-white transition-colors">
+                                {track.title}
+                              </h3>
+                              {currentTrack?.id === track.id && (
+                                <AudioSpectrum isPlaying={isPlaying} audioElement={audioElement} className="hidden md:block" />
+                              )}
+                            </div>
+                            <p className="text-sm md:text-sm text-muted-foreground truncate group-hover:text-white/80 transition-colors">
+                              {track.artist}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="relative z-50" onClick={(e) => e.stopPropagation()}>
+                              <div className="relative">
+                                <ReactionButton
+                                  commentId={track.id.toString()}
+                                  reactions={trackReactions[track.id] || {
+                                    like: 0,
+                                    dislike: 0,
+                                    love: 0,
+                                    laugh: 0,
+                                    surprise: 0,
+                                    sad: 0,
+                                    mad: 0
+                                  }}
+                                  userReaction={userReactions[track.id]}
+                                  onReaction={(_, type) => handleTrackReaction(track.id, type)}
+                                  user={user}
+                                />
+                              </div>
+                            </div>
+                            <div className="flex-shrink-0">
+                              <div className={`p-1 md:p-2 rounded-full h-8 w-8 md:h-10 md:w-10 flex items-center justify-center transition-all duration-200 ${
+                                currentTrack?.id === track.id ? 'bg-primary group-hover:scale-110' : 'bg-primary/20 group-hover:bg-primary/30'
+                              }`}>
+                                {currentTrack?.id === track.id ? (
+                                  isPlaying ? (
+                                    <PauseIcon className="h-4 w-4 md:h-4 md:w-4 text-white" />
+                                  ) : (
+                                    <PlayIcon className="h-4 w-4 md:h-4 md:w-4 text-white" />
+                                  )
+                                ) : (
+                                  <MusicalNoteIcon className="h-4 w-4 md:h-4 md:w-4 text-white/40 group-hover:text-white/60" />
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      {Array.from({ length: tracks.length - visibleTracks.length }).map((_, index) => (
+                        <TrackSkeleton key={`skeleton-${index}`} />
+                      ))}
+                    </>
+                  ) : (
+                    // Show all loaded tracks
+                    visibleTracks.map((track) => (
                       <div
                         key={track.id}
                         data-track-id={track.id}
                         className={`flex items-center gap-3 md:gap-4 p-3 md:p-4 hover:bg-white/10 transition-all duration-200 cursor-pointer group rounded-lg ${
-                          isCurrentTrack ? 'bg-primary/10' : ''
+                          currentTrack?.id === track.id ? 'bg-primary/10' : ''
                         }`}
                         onClick={() => onTrackSelect(track)}
                       >
@@ -432,7 +548,7 @@ export const TrackList = ({ tracks, onTrackSelect, currentTrack, isPlaying, audi
                             <h3 className="font-medium truncate text-base md:text-base group-hover:text-white transition-colors">
                               {track.title}
                             </h3>
-                            {isCurrentTrack && (
+                            {currentTrack?.id === track.id && (
                               <AudioSpectrum isPlaying={isPlaying} audioElement={audioElement} className="hidden md:block" />
                             )}
                           </div>
@@ -462,9 +578,9 @@ export const TrackList = ({ tracks, onTrackSelect, currentTrack, isPlaying, audi
                           </div>
                           <div className="flex-shrink-0">
                             <div className={`p-1 md:p-2 rounded-full h-8 w-8 md:h-10 md:w-10 flex items-center justify-center transition-all duration-200 ${
-                              isCurrentTrack ? 'bg-primary group-hover:scale-110' : 'bg-primary/20 group-hover:bg-primary/30'
+                              currentTrack?.id === track.id ? 'bg-primary group-hover:scale-110' : 'bg-primary/20 group-hover:bg-primary/30'
                             }`}>
-                              {isCurrentTrack ? (
+                              {currentTrack?.id === track.id ? (
                                 isPlaying ? (
                                   <PauseIcon className="h-4 w-4 md:h-4 md:w-4 text-white" />
                                 ) : (
@@ -477,8 +593,8 @@ export const TrackList = ({ tracks, onTrackSelect, currentTrack, isPlaying, audi
                           </div>
                         </div>
                       </div>
-                    );
-                  })}
+                    ))
+                  )}
                 </div>
                 {showScrollIndicator && (
                   <div className="absolute bottom-0 left-0 right-0 flex justify-center pb-1 md:pb-2">
